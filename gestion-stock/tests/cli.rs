@@ -95,3 +95,52 @@ fn fichier_abime_signale_la_ligne_et_reste_intact() {
     );
     let _ = std::fs::remove_file(&f);
 }
+
+#[test]
+fn fichier_absent_est_annonce_avec_son_chemin_complet() {
+    let f = fichier("absent");
+    let o = lancer(&f, &["lister"]);
+    assert!(o.status.success());
+    assert!(sortie(&o).contains("Aucun produit enregistré."));
+    assert!(erreur(&o).contains("introuvable"), "{}", erreur(&o));
+    assert!(
+        erreur(&o).contains(&f.display().to_string()),
+        "{}",
+        erreur(&o)
+    );
+    assert!(!f.exists());
+}
+
+#[test]
+fn entree_sur_fichier_absent_dit_ou_le_programme_a_cherche() {
+    let f = fichier("absent-entree");
+    let o = lancer(&f, &["entree", "Riz", "5"]);
+    assert_eq!(o.status.code(), Some(1));
+    assert!(erreur(&o).contains("Produit inconnu"), "{}", erreur(&o));
+    assert!(
+        erreur(&o).contains(&f.display().to_string()),
+        "{}",
+        erreur(&o)
+    );
+    assert!(!f.exists());
+}
+
+#[test]
+fn creation_du_fichier_est_annoncee_une_seule_fois() {
+    let f = fichier("creation");
+    let o = lancer(&f, &["ajouter", "Riz"]);
+    assert!(o.status.success());
+    assert!(
+        erreur(&o).contains("Nouveau fichier de données créé"),
+        "{}",
+        erreur(&o)
+    );
+    assert!(
+        erreur(&o).contains(&f.display().to_string()),
+        "{}",
+        erreur(&o)
+    );
+    let o2 = lancer(&f, &["lister"]);
+    assert_eq!(erreur(&o2), "");
+    let _ = std::fs::remove_file(&f);
+}

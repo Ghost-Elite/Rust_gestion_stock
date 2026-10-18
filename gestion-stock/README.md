@@ -38,6 +38,8 @@ Dans le fichier `stock.txt`, dans le dossier où tu lances le programme. Pour ut
 STOCK_FICHIER=/chemin/vers/mon-stock.txt stock lister
 ```
 
+**Attention au dossier.** Si le programme ne trouve pas le fichier, il part d'un stock vide et te prévient sur la sortie d'erreur : `Note : fichier de données introuvable (« … »). On part d'un stock vide.` Si tu vois ce message alors que tu as déjà du stock, tu n'es pas dans le bon dossier : n'enregistre rien, sinon tu crées un deuxième fichier. Le plus sûr est de toujours indiquer le chemin complet avec `STOCK_FICHIER`. À la toute première utilisation, le programme annonce aussi la création du fichier : `Nouveau fichier de données créé : « … »`.
+
 Le fichier est du texte lisible. Si tu as fait une faute de frappe dans un nom de produit, tu peux l'ouvrir et la corriger à la main (une ligne `P;nom;quantité;seuil` par produit).
 
 ## Sauvegarde conseillée

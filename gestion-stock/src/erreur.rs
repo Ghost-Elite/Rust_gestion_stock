@@ -48,7 +48,7 @@ impl fmt::Display for ErreurStock {
             ErreurStock::FichierCorrompu { ligne } => {
                 write!(f, "Fichier de données corrompu à la ligne {ligne}.")
             }
-            ErreurStock::Io(message) => write!(f, "Erreur de fichier : {message}"),
+            ErreurStock::Io(message) => write!(f, "{message}"),
             ErreurStock::Utilisation(message) => write!(f, "{message}"),
         }
     }

@@ -8,11 +8,32 @@
 use crate::erreur::ErreurStock;
 use crate::stock::{Genre, Mouvement, Stock};
 use std::fs;
-use std::io::ErrorKind;
-use std::path::Path;
+use std::io::{ErrorKind, Write};
+use std::path::{Path, PathBuf};
 
-fn erreur_io(e: std::io::Error) -> ErreurStock {
-    ErreurStock::Io(e.to_string())
+/// Traduit une erreur du système en message français qui nomme le fichier concerné.
+fn erreur_io(chemin: &Path, e: std::io::Error) -> ErreurStock {
+    let raison = match e.kind() {
+        ErrorKind::NotFound => "dossier ou fichier introuvable".to_string(),
+        ErrorKind::PermissionDenied => "accès refusé".to_string(),
+        ErrorKind::IsADirectory => "c'est un dossier, pas un fichier de données".to_string(),
+        ErrorKind::InvalidData => "le fichier n'est pas en UTF-8 : réenregistrez-le en UTF-8 \
+                                   (ou supprimez les caractères illisibles)"
+            .to_string(),
+        _ => e.to_string(),
+    };
+    ErreurStock::Io(format!(
+        "impossible d'utiliser « {} » : {raison}.",
+        chemin.display()
+    ))
+}
+
+/// `stock.txt` -> `stock.txt.tmp` : on ajoute `.tmp` au nom complet, pour ne jamais
+/// écraser un autre fichier de l'utilisateur (comme un `stock.tmp` à lui).
+fn chemin_temporaire(chemin: &Path) -> PathBuf {
+    let mut nom = chemin.as_os_str().to_owned();
+    nom.push(".tmp");
+    PathBuf::from(nom)
 }
 
 /// Lit le fichier de données. Un fichier absent (premier lancement) donne un stock vide.
@@ -20,7 +41,7 @@ pub fn charger(chemin: &Path) -> Result<Stock, ErreurStock> {
     let contenu = match fs::read_to_string(chemin) {
         Ok(texte) => texte,
         Err(e) if e.kind() == ErrorKind::NotFound => return Ok(Stock::nouveau()),
-        Err(e) => return Err(erreur_io(e)),
+        Err(e) => return Err(erreur_io(chemin, e)),
     };
     let mut stock = Stock::nouveau();
     for (index, ligne) in contenu.lines().enumerate() {
@@ -60,8 +81,9 @@ fn lire_ligne(stock: &mut Stock, ligne: &str) -> Option<()> {
     }
 }
 
-/// Écrit tout le stock. On écrit d'abord dans un fichier `.tmp` puis on renomme :
-/// si le programme s'arrête en cours d'écriture, l'ancien fichier reste intact.
+/// Écrit tout le stock. On écrit d'abord dans `<fichier>.tmp`, on force l'écriture sur le
+/// disque, puis on renomme : si le programme ou l'ordinateur s'arrête en cours de route,
+/// c'est l'ancien fichier complet ou le nouveau fichier complet qui reste, jamais un fichier vide.
 pub fn sauvegarder(stock: &Stock, chemin: &Path) -> Result<(), ErreurStock> {
     let produits = stock
         .produits
@@ -76,9 +98,13 @@ pub fn sauvegarder(stock: &Stock, chemin: &Path) -> Result<(), ErreurStock> {
     });
     let texte: String = produits.chain(mouvements).collect();
 
-    let temporaire = chemin.with_extension("tmp");
-    fs::write(&temporaire, texte).map_err(erreur_io)?;
-    fs::rename(&temporaire, chemin).map_err(erreur_io)
+    let io = |e: std::io::Error| erreur_io(chemin, e);
+    let temporaire = chemin_temporaire(chemin);
+    let mut fichier = fs::File::create(&temporaire).map_err(io)?;
+    fichier.write_all(texte.as_bytes()).map_err(io)?;
+    fichier.sync_all().map_err(io)?;
+    drop(fichier);
+    fs::rename(&temporaire, chemin).map_err(io)
 }
 
 #[cfg(test)]
@@ -155,7 +181,7 @@ mod tests {
     fn la_sauvegarde_ne_laisse_pas_de_fichier_temporaire() {
         let chemin = chemin_temp("tmp");
         sauvegarder(&Stock::nouveau(), &chemin).unwrap();
-        assert!(!chemin.with_extension("tmp").exists());
+        assert!(!chemin_temporaire(&chemin).exists());
         std::fs::remove_file(&chemin).unwrap();
     }
 
@@ -168,5 +194,54 @@ mod tests {
             sauvegarder(&Stock::nouveau(), &chemin),
             Err(ErreurStock::Io(_))
         ));
+    }
+
+    #[test]
+    fn dossier_a_la_place_d_un_fichier_donne_un_message_en_francais() {
+        let dossier = std::env::temp_dir();
+        let message = charger(&dossier).unwrap_err().to_string();
+        assert!(
+            message.contains(&dossier.display().to_string()),
+            "{message}"
+        );
+        assert!(message.contains("dossier"), "{message}");
+        assert!(!message.contains("os error"), "{message}");
+    }
+
+    #[test]
+    fn fichier_non_utf8_donne_un_message_en_francais() {
+        let chemin = chemin_temp("non-utf8");
+        std::fs::write(&chemin, [0xFF, 0xFE, 0x00]).unwrap();
+        let message = charger(&chemin).unwrap_err().to_string();
+        assert!(message.contains(&chemin.display().to_string()), "{message}");
+        assert!(
+            message.contains("UTF-8") && message.contains("réenregistrez"),
+            "{message}"
+        );
+        std::fs::remove_file(&chemin).unwrap();
+    }
+
+    #[test]
+    fn ecriture_dans_un_dossier_inexistant_nomme_le_fichier_en_francais() {
+        let chemin = std::env::temp_dir()
+            .join("dossier-qui-n-existe-pas-gestion-stock")
+            .join("stock.txt");
+        let message = sauvegarder(&Stock::nouveau(), &chemin)
+            .unwrap_err()
+            .to_string();
+        assert!(message.contains(&chemin.display().to_string()), "{message}");
+        assert!(message.contains("introuvable"), "{message}");
+        assert!(!message.contains("os error"), "{message}");
+    }
+
+    #[test]
+    fn la_sauvegarde_ne_touche_pas_a_un_fichier_voisin_en_tmp() {
+        let chemin = chemin_temp("voisin");
+        let voisin = chemin.with_extension("tmp");
+        std::fs::write(&voisin, "précieux").unwrap();
+        sauvegarder(&Stock::nouveau(), &chemin).unwrap();
+        assert_eq!(std::fs::read_to_string(&voisin).unwrap(), "précieux");
+        std::fs::remove_file(&chemin).unwrap();
+        std::fs::remove_file(&voisin).unwrap();
     }
 }
