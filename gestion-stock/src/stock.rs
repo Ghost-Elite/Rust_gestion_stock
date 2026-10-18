@@ -27,7 +27,7 @@ pub struct Mouvement {
     pub quantite: u32,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Stock {
     pub(crate) produits: Vec<Produit>,
     pub(crate) historique: Vec<Mouvement>,
@@ -60,6 +60,11 @@ impl Stock {
         if quantite == 0 {
             return Err(ErreurStock::QuantiteNulle);
         }
+        self.chercher(nom)
+    }
+
+    /// Position du produit, ou `ProduitInconnu` avec le nom tel que tapé (nettoyé).
+    fn chercher(&self, nom: &str) -> Result<usize, ErreurStock> {
         self.position(nom)
             .ok_or_else(|| ErreurStock::ProduitInconnu(nom.trim().to_string()))
     }
@@ -123,6 +128,34 @@ impl Stock {
             }
         })?;
         self.appliquer(i, Genre::Sortie, quantite, reste)
+    }
+
+    /// Ordre des vérifications : nom invalide, produit inconnu, nom déjà pris par un AUTRE produit.
+    /// Changer seulement la casse ou les espaces du même produit est permis.
+    /// Le nouveau nom remplace aussi l'ancien dans tout l'historique.
+    pub fn renommer_produit(&mut self, ancien: &str, nouveau: &str) -> Result<(), ErreurStock> {
+        let nouveau = nettoyer_nom(nouveau)?;
+        let i = self.chercher(ancien)?;
+        if let Some(j) = self.position(&nouveau)
+            && j != i
+        {
+            return Err(ErreurStock::ProduitExistant(self.produits[j].nom.clone()));
+        }
+        let ancien_nom = self.produits[i].nom.to_lowercase();
+        for mouvement in &mut self.historique {
+            if mouvement.nom.to_lowercase() == ancien_nom {
+                mouvement.nom = nouveau.clone();
+            }
+        }
+        self.produits[i].nom = nouveau;
+        Ok(())
+    }
+
+    /// Retire le produit ; l'historique est conservé tel quel.
+    pub fn supprimer_produit(&mut self, nom: &str) -> Result<(), ErreurStock> {
+        let i = self.chercher(nom)?;
+        self.produits.remove(i);
+        Ok(())
     }
 
     pub fn produits(&self) -> Vec<&Produit> {
@@ -283,5 +316,76 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn renommer_change_le_nom_du_produit_et_celui_de_l_historique() {
+        let mut s = stock_avec_riz();
+        s.enregistrer_entree("Riz 5kg", 12).unwrap();
+        s.renommer_produit("riz 5KG", "  Riz basmati 5kg ").unwrap();
+        assert_eq!(s.produits()[0].nom, "Riz basmati 5kg");
+        assert_eq!(s.produits()[0].quantite, 12);
+        assert_eq!(s.historique()[0].nom, "Riz basmati 5kg");
+        assert!(s.enregistrer_entree("Riz basmati 5kg", 1).is_ok());
+    }
+
+    #[test]
+    fn renommer_autorise_le_changement_de_casse_du_meme_produit() {
+        let mut s = stock_avec_riz();
+        s.renommer_produit("Riz 5kg", "RIZ 5KG").unwrap();
+        assert_eq!(s.produits()[0].nom, "RIZ 5KG");
+    }
+
+    #[test]
+    fn renommer_refuse_le_nom_d_un_autre_produit() {
+        let mut s = stock_avec_riz();
+        s.ajouter_produit("Sucre", 0).unwrap();
+        assert_eq!(
+            s.renommer_produit("Sucre", " riz 5KG "),
+            Err(ErreurStock::ProduitExistant("Riz 5kg".into()))
+        );
+        let noms: Vec<&str> = s.produits().iter().map(|p| p.nom.as_str()).collect();
+        assert_eq!(noms, ["Riz 5kg", "Sucre"]);
+    }
+
+    #[test]
+    fn renommer_refuse_un_nom_invalide_ou_un_produit_inconnu() {
+        let mut s = stock_avec_riz();
+        for nom in ["", "   ", "a;b", "a\nb"] {
+            assert!(
+                matches!(
+                    s.renommer_produit("Riz 5kg", nom),
+                    Err(ErreurStock::NomInvalide(_))
+                ),
+                "{nom:?}"
+            );
+        }
+        assert_eq!(
+            s.renommer_produit("Sel", "Sel fin"),
+            Err(ErreurStock::ProduitInconnu("Sel".into()))
+        );
+        assert_eq!(s.produits()[0].nom, "Riz 5kg");
+    }
+
+    #[test]
+    fn supprimer_retire_le_produit_et_garde_l_historique() {
+        let mut s = stock_avec_riz();
+        s.enregistrer_entree("Riz 5kg", 3).unwrap();
+        s.supprimer_produit(" RIZ 5KG ").unwrap();
+        assert!(s.produits().is_empty());
+        assert_eq!(s.historique().len(), 1);
+        assert_eq!(
+            s.supprimer_produit("RIZ 5KG"),
+            Err(ErreurStock::ProduitInconnu("RIZ 5KG".into()))
+        );
+    }
+
+    #[test]
+    fn un_clone_est_independant_de_l_original() {
+        let s = stock_avec_riz();
+        let mut copie = s.clone();
+        copie.enregistrer_entree("Riz 5kg", 7).unwrap();
+        assert_eq!(s.produits()[0].quantite, 0);
+        assert_eq!(copie.produits()[0].quantite, 7);
     }
 }
