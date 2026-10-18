@@ -4,6 +4,22 @@ Une fenêtre sobre pour suivre le stock d'une boutique : voir et chercher les pr
 
 Elle utilise le même cœur que le programme en ligne de commande (`../gestion-stock`) et lit le même format de fichier.
 
+## Apparence
+
+Un fond gris très clair, des cartes blanches aux coins arrondis, une seule couleur d'accent (indigo), des puces pour les états et trois chiffres en haut : produits, produits en alerte, unités en stock. La police est **Inter**, avec deux graisses pour une vraie hiérarchie. Sous 800 points de large, ou quand le texte est agrandi, la fenêtre passe en une seule colonne.
+
+Les couleurs sont toutes dans `src/palette.rs`, où le contraste de chacune est vérifié par des tests. Pour **voir** la fenêtre sans l'ouvrir, un outil dessine l'interface dans des images :
+
+```bash
+APERCU_DOSSIER=/chemin/de/sortie UPDATE_SNAPSHOTS=true cargo test --test apercu -- --ignored
+```
+
+## Suggestions de produits
+
+Dans « Ajouter un produit », des produits courants de boutique sont proposés sous le champ du nom : on les **choisit d'un clic** au lieu de les taper. Ils se filtrent pendant la frappe (sans tenir compte des majuscules ni des accents : « the » trouve « Thé vert »). Choisir un produit remplit le nom et le seuil d'alerte conseillé, sauf si un seuil est déjà tapé. Un produit déjà en stock n'est jamais proposé.
+
+La liste de départ est dans `src/catalogue.rs` : c'est une proposition, à adapter à la boutique (les produits les plus courants en premier).
+
 ## Lancer
 
 ```bash
@@ -62,8 +78,8 @@ Le programme ne collecte aucune donnée personnelle, n'ouvre aucune connexion r�
 La liste complète des dépendances, pour **toutes** les plateformes (Windows, macOS, Linux), est dans [LICENCES-TIERS.txt](LICENCES-TIERS.txt). Elles sont sous licences permissives (MIT, Apache-2.0, Zlib, BSD, ISC, BSL-1.0, Unicode et assimilées).
 
 - Deux dépendances sont proposées avec une option copyleft **en plus** d'une option permissive : `self_cell` (« Apache-2.0 OR GPL-2.0-only ») et `r-efi` (« MIT OR Apache-2.0 OR LGPL-2.1-or-later »). On utilise toujours l'option permissive.
-- Les polices par défaut d'egui sont **intégrées au programme** ; elles sont sous les licences OFL-1.1 et Ubuntu-font-1.0.
-- Si tu distribues le programme à d'autres personnes, joins les mentions de licence des dépendances (MIT, Apache-2.0, OFL, Ubuntu-font).
+- Deux polices sont **intégrées au programme** : **Inter** (Regular et SemiBold, licence SIL OFL 1.1, copyright The Inter Project Authors ; le texte de la licence est dans `assets/polices/LICENCE-Inter-OFL-1.1.txt`), tirée de la version 4.0 officielle (`Inter-4.0.zip`, SHA-256 `ff970a5d4561a04f102a7cb781adbd6ac4e9b6c460914c7a101f15acb7f7d1a4`), et les polices par défaut d'egui (OFL-1.1 et Ubuntu-font-1.0), gardées en secours pour les symboles.
+- Si tu distribues le programme à d'autres personnes, joins les mentions de licence des dépendances (MIT, Apache-2.0, OFL, Ubuntu-font) et celle d'Inter.
 - Le code des deux programmes de ce dépôt n'a pas encore de licence choisie : c'est à son auteur de la décider.
 
 La liste se régénère avec `cargo tree --prefix none --format "{p} {l}" -e normal --target all`.

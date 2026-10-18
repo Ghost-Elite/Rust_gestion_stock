@@ -4,6 +4,7 @@
 //! réussit on sauvegarde la copie, et seulement si la sauvegarde réussit la copie remplace
 //! le stock. Ainsi la liste affichée ne diffère jamais du fichier, même si l'écriture échoue.
 
+use crate::catalogue::{CATALOGUE, Suggestion, suggerer};
 use gestion_stock::erreur::ErreurStock;
 use gestion_stock::stock::{Genre, Stock};
 use gestion_stock::stockage::{charger, sauvegarder};
@@ -23,6 +24,15 @@ pub struct LigneProduit {
     pub quantite: u32,
     pub seuil: u32,
     pub en_alerte: bool,
+}
+
+/// Les trois chiffres du haut de la fenêtre.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Resume {
+    pub produits: usize,
+    pub en_alerte: usize,
+    /// Total des quantités en stock, tous produits confondus.
+    pub unites: u64,
 }
 
 #[derive(Debug)]
@@ -121,6 +131,27 @@ impl Etat {
                 en_alerte: p.en_alerte(),
             })
             .collect()
+    }
+
+    /// Des produits courants à proposer pour ce qui est tapé (voir `catalogue`), sans ceux qui
+    /// sont déjà en stock.
+    pub fn suggestions(&self, saisie: &str, limite: usize) -> Vec<&'static Suggestion> {
+        let deja: Vec<String> = self
+            .stock
+            .produits()
+            .iter()
+            .map(|p| p.nom.clone())
+            .collect();
+        suggerer(CATALOGUE, saisie, &deja, limite)
+    }
+
+    pub fn resume(&self) -> Resume {
+        let produits = self.stock.produits();
+        Resume {
+            produits: produits.len(),
+            en_alerte: produits.iter().filter(|p| p.en_alerte()).count(),
+            unites: produits.iter().map(|p| u64::from(p.quantite)).sum(),
+        }
     }
 
     /// Du plus récent au plus ancien.
@@ -527,5 +558,46 @@ mod tests {
         let affiche = chemin_complet(Path::new("stock.txt"));
         assert!(Path::new(&affiche).is_absolute(), "{affiche}");
         assert!(affiche.ends_with("stock.txt"));
+    }
+
+    #[test]
+    fn le_resume_compte_les_produits_les_alertes_et_les_unites() {
+        let mut e = etat_avec_riz("resume"); // Riz 5kg : 12, seuil 5 (correct)
+        e.ajouter("Savon", "3"); // 0 <= 3 : en alerte
+        e.ajouter("Sucre", "0");
+        e.entree("Sucre", "30");
+        assert_eq!(
+            e.resume(),
+            Resume {
+                produits: 3,
+                en_alerte: 1,
+                unites: 42
+            }
+        );
+    }
+
+    #[test]
+    fn le_resume_d_un_stock_vide_est_a_zero() {
+        let e = Etat::ouvrir(chemin_temp("resume-vide")).unwrap();
+        assert_eq!(
+            e.resume(),
+            Resume {
+                produits: 0,
+                en_alerte: 0,
+                unites: 0
+            }
+        );
+    }
+
+    #[test]
+    fn les_suggestions_excluent_les_produits_deja_en_stock_et_suivent_la_saisie() {
+        let mut e = Etat::ouvrir(chemin_temp("suggestions")).unwrap();
+        assert!(e.ajouter("CAFÉ MOULU 250G", "5")); // casse et accents ne comptent pas
+        let tous: Vec<&str> = e.suggestions("", 100).iter().map(|s| s.nom).collect();
+        assert!(!tous.contains(&"Café moulu 250g"));
+        assert!(tous.contains(&"Sel fin 1kg"));
+        let huile: Vec<&str> = e.suggestions("huile", 10).iter().map(|s| s.nom).collect();
+        assert!(!huile.is_empty());
+        assert!(huile.iter().all(|n| n.to_lowercase().contains("huile")));
     }
 }

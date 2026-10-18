@@ -8,7 +8,7 @@ gestion-stock = { path = "../gestion-stock" }
 eframe = "0.35"
 
 [dev-dependencies]
-egui_kittest = "0.35"
+egui_kittest = { version = "0.35", features = ["wgpu", "snapshot"] }
 
 [[bin]]
 name = "stock-gui"

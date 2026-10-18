@@ -2,20 +2,25 @@
 //! plus tard, il suffira de modifier ce fichier.
 
 pub const TITRE_FENETRE: &str = "Gestion de stock";
+pub const SOUS_TITRE: &str = "Suivez vos entrées, vos sorties et vos alertes de stock.";
+
+pub const CHIFFRE_PRODUITS: &str = "Produits";
+pub const CHIFFRE_ALERTES: &str = "En alerte";
+pub const CHIFFRE_UNITES: &str = "Unités en stock";
 
 pub const RECHERCHE: &str = "Rechercher un produit";
 pub const ALERTES_SEULEMENT: &str = "Afficher seulement les produits en alerte";
 
-pub const COLONNE_PRODUIT: &str = "Produit";
-pub const COLONNE_STOCK: &str = "En stock";
-pub const COLONNE_SEUIL: &str = "Seuil";
-pub const COLONNE_ETAT: &str = "État";
+pub const SECTION_LISTE: &str = "Vos produits";
+pub const STOCK_UNITE: &str = "en stock";
 pub const ETAT_ALERTE: &str = "ALERTE : stock bas";
 pub const ETAT_CORRECT: &str = "Correct";
 pub const AUCUN_PRODUIT: &str = "Aucun produit à afficher.";
 
 pub const SECTION_AJOUT: &str = "Ajouter un produit";
+pub const SECTION_ACTIONS: &str = "Actions sur le produit";
 pub const CHAMP_NOM: &str = "Nom du produit";
+pub const TITRE_SUGGESTIONS: &str = "Suggestions (cliquez pour choisir)";
 pub const CHAMP_SEUIL: &str = "Seuil d'alerte (facultatif)";
 pub const BOUTON_AJOUTER: &str = "Ajouter le produit";
 
@@ -36,6 +41,10 @@ pub const AUCUN_MOUVEMENT: &str = "Aucun mouvement enregistré.";
 pub const ERREUR_OUVERTURE_TITRE: &str = "Impossible d'ouvrir le fichier de données";
 pub const ERREUR_OUVERTURE_AIDE: &str = "Rien n'a été modifié. Corrigez le fichier, ou indiquez un autre emplacement avec la variable STOCK_FICHIER, puis relancez le programme.";
 pub const BOUTON_QUITTER: &str = "Quitter";
+
+pub fn seuil_court(seuil: u32) -> String {
+    format!("Seuil : {seuil}")
+}
 
 pub fn produit_selectionne(nom: &str, quantite: u32) -> String {
     format!("Produit sélectionné : {nom} ({quantite} en stock)")
