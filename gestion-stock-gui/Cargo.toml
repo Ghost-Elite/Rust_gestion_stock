@@ -1,0 +1,15 @@
+[package]
+name = "gestion-stock-gui"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+gestion-stock = { path = "../gestion-stock" }
+eframe = "0.35"
+
+[dev-dependencies]
+egui_kittest = "0.35"
+
+[[bin]]
+name = "stock-gui"
+path = "src/main.rs"
