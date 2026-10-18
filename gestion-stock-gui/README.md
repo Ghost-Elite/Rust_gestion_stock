@@ -58,14 +58,14 @@ Le but est le niveau AA des WCAG 2.1, qui est la référence de la norme europé
 | 1.4.11 Contraste des composants (≥ 3:1) | Tenu pour les bordures | bordures testées ; la visibilité du focus clavier reste à vérifier à la main |
 | 1.4.1 Couleur seule | Tenu | l'alerte est écrite : « ALERTE : stock bas » |
 | 1.4.4 Redimensionnement du texte | Tenu | zoom au clavier d'egui (`Cmd`/`Ctrl` + `+`, `−`, `0`) ; à 200 % la fenêtre passe en une seule colonne et l'alerte reste visible (test) |
-| 1.4.10 Reflow | Partiel | une seule colonne quand la place manque ; le tableau (exempté par la norme) défile horizontalement au besoin |
+| 1.4.10 Reflow | Partiel | une seule colonne quand la place manque, et les noms longs passent à la ligne ; l'alerte reste visible à 200 % et en petite fenêtre (test) |
 | 2.1.1 Clavier | À vérifier à la main | tout se fait avec `Tab`, `Maj+Tab`, `Espace`, `Entrée` |
 | 3.3.1 / 3.3.3 Erreurs | Tenu | messages « Erreur : … » en français qui disent quoi faire ; un bouton reste grisé tant que son champ est vide |
 | 3.3.2 Étiquettes | Tenu | chaque champ est relié à son libellé ; vérifié par des tests qui interrogent le **rôle** (champ de saisie) et le nom |
 | 4.1.2 Nom, rôle, valeur | Partiel | noms et rôles vérifiés par des tests ; le rendu avec un lecteur d'écran reste à vérifier à la main |
 | 4.1.3 Messages d'état | **Non couvert** | egui 0.35 n'a pas de région « live » : un lecteur d'écran n'annonce pas tout seul les messages du bas de la fenêtre |
 | 2.4.3 Ordre du focus | **Limite connue** | l'ordre de `Tab` suit l'ordre de dessin : en disposition à deux colonnes, le panneau de droite (ajout, commandes) vient avant la recherche et la liste |
-| 1.3.1 Information et relations | **Limite connue** | le tableau est une grille d'egui : un lecteur d'écran n'y voit ni tableau, ni lignes, ni colonnes |
+| 1.3.1 Information et relations | **Limite connue** | la liste est faite de cartes, pas d'un vrai tableau : un lecteur d'écran lit chaque ligne comme une suite de textes (nom, état, seuil, quantité) sans structure de tableau ; chaque valeur est écrite en toutes lettres (« Seuil : 5 », « en stock ») pour rester compréhensible |
 
 **Autres limites connues :** `Entrée` ne valide pas un formulaire (il faut activer le bouton) ; après « Supprimer le produit » au clavier, le bouton disparaît et le focus est perdu ; un seul thème clair ; les textes de l'interface sont dans `src/textes.rs` mais les messages de résultat sont dans `src/etat.rs` et ceux de la bibliothèque dans `../gestion-stock/src/erreur.rs` (une traduction devra toucher ces trois endroits) ; la qualité de la lecture par un lecteur d'écran dépend d'egui et d'AccessKit.
 
