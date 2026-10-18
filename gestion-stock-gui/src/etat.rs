@@ -59,6 +59,17 @@ fn lire_seuil(texte: &str) -> Result<u32, ErreurStock> {
     })
 }
 
+/// Le chemin tel qu'on l'affiche : toujours absolu, pour que la personne sache exactement
+/// quel fichier est utilisé, même si `STOCK_FICHIER` est un chemin relatif.
+pub fn chemin_complet(chemin: &Path) -> String {
+    std::path::absolute(chemin)
+        .unwrap_or_else(|_| chemin.to_path_buf())
+        .display()
+        .to_string()
+}
+
+const FICHIER_MODIFIE: &str = "Le fichier de données a été modifié par un autre programme ou une autre fenêtre : rien n'a été enregistré. Fermez puis rouvrez le programme pour voir le stock à jour.";
+
 impl Etat {
     /// Crée le dossier du fichier s'il manque. Un fichier absent donne un stock vide,
     /// et on le dit ; un fichier abîmé est une erreur (il n'est jamais écrasé).
@@ -126,16 +137,34 @@ impl Etat {
             .collect()
     }
 
-    /// Applique l'action sur une copie, sauvegarde, puis adopte la copie (voir l'en-tête).
+    /// Refuse d'enregistrer si le fichier n'est plus tel que cet écran l'a chargé : sinon on
+    /// l'écraserait avec un stock périmé et les mouvements faits ailleurs (autre fenêtre,
+    /// programme en ligne de commande) seraient perdus sans un mot.
+    fn verifier_fichier_inchange(&self) -> Result<(), ErreurStock> {
+        let sur_disque = charger(&self.chemin)?;
+        if sur_disque.produits() == self.stock.produits()
+            && sur_disque.historique() == self.stock.historique()
+        {
+            Ok(())
+        } else {
+            Err(ErreurStock::Utilisation(FICHIER_MODIFIE.to_string()))
+        }
+    }
+
+    /// Vérifie le fichier, applique l'action sur une copie, sauvegarde, puis adopte la copie
+    /// (voir l'en-tête).
     fn appliquer(
         &mut self,
         action: impl FnOnce(&mut Stock) -> Result<String, ErreurStock>,
     ) -> bool {
-        let mut copie = self.stock.clone();
-        let resultat = action(&mut copie)
-            .and_then(|message| sauvegarder(&copie, &self.chemin).map(|()| message));
+        let resultat = self.verifier_fichier_inchange().and_then(|()| {
+            let mut copie = self.stock.clone();
+            let message = action(&mut copie)?;
+            sauvegarder(&copie, &self.chemin)?;
+            Ok((copie, message))
+        });
         match resultat {
-            Ok(message) => {
+            Ok((copie, message)) => {
                 self.stock = copie;
                 self.retour = Some(Retour::Succes(message));
                 true
@@ -474,5 +503,29 @@ mod tests {
             ["Sortie -2 Riz 5kg", "Entrée +12 Riz 5kg"]
         );
         assert_eq!(e.historique(1), ["Sortie -2 Riz 5kg"]);
+    }
+
+    #[test]
+    fn deux_fenetres_sur_le_meme_fichier_ne_perdent_aucun_mouvement() {
+        let mut a = etat_avec_riz("deux-fenetres"); // le fichier contient Riz 5kg : 12
+        let mut b = Etat::ouvrir(a.chemin().to_path_buf()).unwrap();
+        assert!(a.sortie("Riz 5kg", "5")); // fichier : 7
+        // B montre encore 12 : si elle enregistrait, elle effacerait la sortie de A.
+        assert!(!b.sortie("Riz 5kg", "2"));
+        assert!(
+            matches!(&b.retour, Some(Retour::Erreur(m)) if m.contains("modifié par un autre")),
+            "{:?}",
+            b.retour
+        );
+        let sur_disque = Etat::ouvrir(a.chemin().to_path_buf()).unwrap();
+        assert_eq!(sur_disque.lignes("", false)[0].quantite, 7);
+        assert_eq!(b.lignes("", false)[0].quantite, 12); // B n'a rien changé
+    }
+
+    #[test]
+    fn le_chemin_affiche_est_toujours_absolu() {
+        let affiche = chemin_complet(Path::new("stock.txt"));
+        assert!(Path::new(&affiche).is_absolute(), "{affiche}");
+        assert!(affiche.ends_with("stock.txt"));
     }
 }

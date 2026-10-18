@@ -1,16 +1,17 @@
 use eframe::egui;
 use gestion_stock_gui::chemin::chemin_par_defaut;
 use gestion_stock_gui::etat::Etat;
-use gestion_stock_gui::palette::visuals;
+use gestion_stock_gui::palette::appliquer;
 use gestion_stock_gui::textes::TITRE_FENETRE;
 use gestion_stock_gui::ui::Application;
 
 fn main() -> eframe::Result {
     // Un fichier illisible n'est jamais écrasé : on ouvre alors un écran d'erreur lisible
     // (un double-clic n'a pas de terminal où afficher le message).
-    let application = match Etat::ouvrir(chemin_par_defaut()) {
+    let chemin = chemin_par_defaut();
+    let application = match Etat::ouvrir(chemin.clone()) {
         Ok(etat) => Application::nouvelle(etat),
-        Err(e) => Application::en_erreur(e.to_string()),
+        Err(e) => Application::en_erreur(e.to_string(), &chemin),
     };
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
@@ -23,7 +24,7 @@ fn main() -> eframe::Result {
         TITRE_FENETRE,
         options,
         Box::new(|cc| {
-            cc.egui_ctx.set_visuals(visuals());
+            appliquer(&cc.egui_ctx);
             Ok(Box::new(application))
         }),
     )

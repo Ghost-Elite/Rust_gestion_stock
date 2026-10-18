@@ -3,7 +3,7 @@
 //! Les valeurs sont fixes et vérifiées par les tests en bas de fichier : texte >= 4,5:1
 //! (critère 1.4.3) et contours / focus >= 3:1 (critère 1.4.11).
 
-use eframe::egui::{Color32, Stroke, Visuals};
+use eframe::egui::{Color32, Context, Stroke, Theme, ThemePreference, Visuals};
 
 pub type Rgb = [u8; 3];
 
@@ -11,9 +11,13 @@ pub const FOND: Rgb = [255, 255, 255];
 pub const FOND_PANNEAU: Rgb = [243, 244, 246];
 pub const TEXTE: Rgb = [17, 24, 39];
 pub const BORDURE: Rgb = [107, 114, 128];
-pub const BOUTON_FOND: Rgb = [30, 64, 175];
-pub const BOUTON_SURVOL_FOND: Rgb = [23, 37, 84];
-pub const BOUTON_TEXTE: Rgb = [255, 255, 255];
+// Les boutons sont CLAIRS avec un texte sombre : dans egui, la couleur de texte d'un widget
+// interactif est aussi celle du texte saisi, des libellés de cases et des noms de produits.
+// Un texte blanc sur bouton foncé deviendrait donc blanc sur blanc partout ailleurs.
+pub const BOUTON_FOND: Rgb = [229, 231, 235];
+pub const BOUTON_SURVOL_FOND: Rgb = [209, 213, 219];
+pub const BOUTON_ACTIF_FOND: Rgb = [191, 219, 254];
+pub const BOUTON_TEXTE: Rgb = [17, 24, 39];
 pub const ALERTE_FOND: Rgb = [254, 226, 226];
 pub const ALERTE_TEXTE: Rgb = [153, 27, 27];
 pub const SELECTION_FOND: Rgb = [219, 234, 254];
@@ -52,7 +56,7 @@ pub fn visuals() -> Visuals {
     v.window_fill = couleur(FOND);
     v.extreme_bg_color = couleur(FOND); // fond des champs de saisie
     v.faint_bg_color = couleur(FOND_PANNEAU);
-    v.hyperlink_color = couleur(BOUTON_FOND);
+    v.hyperlink_color = couleur(FOCUS);
 
     let contour = Stroke::new(1.0, couleur(BORDURE));
     let contour_focus = Stroke::new(2.0, couleur(FOCUS));
@@ -64,11 +68,12 @@ pub fn visuals() -> Visuals {
     w.bg_stroke = contour;
     w.fg_stroke = Stroke::new(1.0, couleur(TEXTE));
 
-    // Boutons : texte blanc sur fond bleu foncé ; egui peint les boutons avec `weak_bg_fill`.
+    // Boutons et autres widgets interactifs : texte sombre sur fond clair, et une bordure
+    // qui les distingue du fond ; egui peint les boutons avec `weak_bg_fill`.
     for (w, fond, trait_) in [
         (&mut v.widgets.inactive, BOUTON_FOND, contour),
         (&mut v.widgets.hovered, BOUTON_SURVOL_FOND, contour_focus),
-        (&mut v.widgets.active, BOUTON_SURVOL_FOND, contour_focus),
+        (&mut v.widgets.active, BOUTON_ACTIF_FOND, contour_focus),
         (&mut v.widgets.open, BOUTON_SURVOL_FOND, contour_focus),
     ] {
         w.bg_fill = couleur(fond);
@@ -82,6 +87,15 @@ pub fn visuals() -> Visuals {
     v.selection.bg_fill = couleur(SELECTION_FOND);
     v.selection.stroke = Stroke::new(1.0, couleur(SELECTION_TEXTE));
     v
+}
+
+/// À appeler au démarrage, avant le premier affichage. On impose le thème clair ET on y
+/// range la palette : `Context::set_visuals` écrit dans le thème « courant », et avant le
+/// premier affichage egui ignore encore celui du système (il suppose le sombre) ; la palette
+/// atterrirait dans le mauvais thème et ne serait jamais utilisée sur un Mac en mode clair.
+pub fn appliquer(ctx: &Context) {
+    ctx.set_theme(ThemePreference::Light);
+    ctx.set_visuals_of(Theme::Light, visuals());
 }
 
 #[cfg(test)]
@@ -116,6 +130,7 @@ mod tests {
             ("texte/panneau", TEXTE, FOND_PANNEAU),
             ("bouton", BOUTON_TEXTE, BOUTON_FOND),
             ("bouton survolé", BOUTON_TEXTE, BOUTON_SURVOL_FOND),
+            ("bouton pressé", BOUTON_TEXTE, BOUTON_ACTIF_FOND),
             ("alerte", ALERTE_TEXTE, ALERTE_FOND),
             ("sélection", SELECTION_TEXTE, SELECTION_FOND),
         ];
@@ -135,7 +150,8 @@ mod tests {
             ("bordure/panneau", BORDURE, FOND_PANNEAU),
             ("focus/fond", FOCUS, FOND),
             ("focus/panneau", FOCUS, FOND_PANNEAU),
-            ("bouton/fond", BOUTON_FOND, FOND),
+            // Les boutons sont clairs : c'est leur bordure qui les distingue du fond.
+            ("bordure/bouton", BORDURE, BOUTON_FOND),
         ];
         for (nom, a, b) in paires {
             assert!(
@@ -167,5 +183,40 @@ mod tests {
         assert!(
             rapport_contraste(rgb(v.widgets.inactive.bg_stroke.color), rgb(v.panel_fill)) >= 3.0
         );
+        // egui réutilise la couleur de texte des widgets interactifs SANS cadre : texte saisi
+        // dans un champ, libellé d'une case, nom de produit non sélectionné (état « inactive »)
+        // et titres du tableau (`strong`, état « active »). Elle doit donc passer aussi sur
+        // les fonds de fenêtre, de panneau, de champ et de ligne alternée.
+        for fond in [
+            v.panel_fill,
+            v.window_fill,
+            v.extreme_bg_color,
+            v.faint_bg_color,
+        ] {
+            assert!(rapport_contraste(rgb(v.widgets.inactive.fg_stroke.color), rgb(fond)) >= 4.5);
+        }
+        for fond in [v.panel_fill, v.window_fill, v.faint_bg_color] {
+            assert!(rapport_contraste(rgb(v.widgets.active.fg_stroke.color), rgb(fond)) >= 4.5);
+        }
+    }
+
+    #[test]
+    fn appliquer_impose_la_palette_quel_que_soit_le_theme_du_systeme() {
+        use eframe::egui::{Context, RawInput, Theme};
+        // Au démarrage, `appliquer` est appelé AVANT le premier affichage, quand egui ne
+        // connaît pas encore le thème du système : la palette doit quand même s'imposer.
+        for systeme in [Some(Theme::Light), Some(Theme::Dark), None] {
+            let ctx = Context::default();
+            appliquer(&ctx);
+            let entree = RawInput {
+                system_theme: systeme,
+                ..Default::default()
+            };
+            let _ = ctx.run_ui(entree, |_ui| {});
+            assert!(
+                ctx.global_style().visuals == visuals(),
+                "thème du système : {systeme:?}"
+            );
+        }
     }
 }
