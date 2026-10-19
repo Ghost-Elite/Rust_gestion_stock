@@ -1,10 +1,17 @@
 use crate::erreur::ErreurStock;
+use crate::monnaie::{MONTANT_MAX, Montant};
+use crate::reglages::Reglages;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Produit {
     pub nom: String,
     pub quantite: u32,
     pub seuil: u32,
+    /// Le prix de vente (TTC en Europe, hors taxe aux États-Unis) ; sans prix, pas de vente.
+    pub prix: Option<Montant>,
+    /// Le taux de TVA ou de taxe de ce produit, en centièmes de pour cent ; sans taux, celui
+    /// des réglages.
+    pub taux_bp: Option<u32>,
 }
 
 impl Produit {
@@ -31,6 +38,7 @@ pub struct Mouvement {
 pub struct Stock {
     pub(crate) produits: Vec<Produit>,
     pub(crate) historique: Vec<Mouvement>,
+    pub(crate) reglages: Reglages,
 }
 
 /// Retire les espaces autour du nom et refuse ce qui casserait le fichier de données.
@@ -96,7 +104,55 @@ impl Stock {
             nom,
             quantite: 0,
             seuil,
+            prix: None,
+            taux_bp: None,
         });
+        Ok(())
+    }
+
+    /// Donne (ou retire, avec `None`) le prix et le taux d'un produit. Rien ne change si une
+    /// valeur est refusée : prix négatif ou au-delà de la limite, taux au-delà de 100 %.
+    pub fn definir_prix(
+        &mut self,
+        nom: &str,
+        prix: Option<Montant>,
+        taux_bp: Option<u32>,
+    ) -> Result<(), ErreurStock> {
+        let i = self.chercher(nom)?;
+        if let Some(prix) = prix {
+            if prix.0 < 0 {
+                return Err(ErreurStock::MontantInvalide(
+                    self.reglages.devise.formater(prix),
+                ));
+            }
+            if prix > MONTANT_MAX {
+                return Err(ErreurStock::MontantTropGrand);
+            }
+        }
+        if let Some(taux) = taux_bp {
+            self.verifier_taux(taux)?;
+        }
+        self.produits[i].prix = prix;
+        self.produits[i].taux_bp = taux_bp;
+        Ok(())
+    }
+
+    fn verifier_taux(&self, taux_bp: u32) -> Result<(), ErreurStock> {
+        if taux_bp > 10_000 {
+            return Err(ErreurStock::TauxInvalide(
+                self.reglages.devise.formater_taux(taux_bp),
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn reglages(&self) -> Reglages {
+        self.reglages
+    }
+
+    pub fn definir_reglages(&mut self, reglages: Reglages) -> Result<(), ErreurStock> {
+        self.verifier_taux(reglages.taux_defaut_bp)?;
+        self.reglages = reglages;
         Ok(())
     }
 
@@ -387,5 +443,78 @@ mod tests {
         copie.enregistrer_entree("Riz 5kg", 7).unwrap();
         assert_eq!(s.produits()[0].quantite, 0);
         assert_eq!(copie.produits()[0].quantite, 7);
+    }
+
+    #[test]
+    fn definir_prix_et_taux_sur_un_produit_connu() {
+        use crate::monnaie::Montant;
+        let mut s = stock_avec_riz();
+        s.definir_prix(" RIZ 5KG ", Some(Montant(350)), Some(550))
+            .unwrap();
+        let p = &s.produits()[0];
+        assert_eq!((p.prix, p.taux_bp), (Some(Montant(350)), Some(550)));
+        s.definir_prix("Riz 5kg", None, None).unwrap();
+        let p = &s.produits()[0];
+        assert_eq!((p.prix, p.taux_bp), (None, None));
+    }
+
+    #[test]
+    fn definir_prix_refuse_les_valeurs_impossibles_et_ne_change_rien() {
+        use crate::monnaie::{MONTANT_MAX, Montant};
+        let mut s = stock_avec_riz();
+        s.definir_prix("Riz 5kg", Some(Montant(350)), Some(550))
+            .unwrap();
+        assert_eq!(
+            s.definir_prix("Sel", Some(Montant(100)), None),
+            Err(ErreurStock::ProduitInconnu("Sel".into()))
+        );
+        assert!(matches!(
+            s.definir_prix("Riz 5kg", None, Some(10_001)),
+            Err(ErreurStock::TauxInvalide(_))
+        ));
+        assert!(matches!(
+            s.definir_prix("Riz 5kg", Some(Montant(-1)), None),
+            Err(ErreurStock::MontantInvalide(_))
+        ));
+        assert_eq!(
+            s.definir_prix("Riz 5kg", Some(Montant(MONTANT_MAX.0 + 1)), None),
+            Err(ErreurStock::MontantTropGrand)
+        );
+        let p = &s.produits()[0];
+        assert_eq!((p.prix, p.taux_bp), (Some(Montant(350)), Some(550)));
+    }
+
+    #[test]
+    fn les_reglages_par_defaut_sont_europe_eur_vingt_pour_cent() {
+        use crate::monnaie::Devise;
+        use crate::reglages::Profil;
+        let r = Stock::nouveau().reglages();
+        assert_eq!(
+            (r.profil, r.devise, r.taux_defaut_bp),
+            (Profil::Europe, Devise::Eur, 2000)
+        );
+    }
+
+    #[test]
+    fn definir_reglages_les_conserve_et_refuse_un_taux_au_dela_de_cent_pour_cent() {
+        use crate::monnaie::Devise;
+        use crate::reglages::{Profil, Reglages};
+        let mut s = Stock::nouveau();
+        let voulus = Reglages {
+            profil: Profil::EtatsUnis,
+            devise: Devise::Usd,
+            taux_defaut_bp: 825,
+        };
+        s.definir_reglages(voulus).unwrap();
+        assert_eq!(s.reglages(), voulus);
+        let trop = Reglages {
+            taux_defaut_bp: 10_001,
+            ..voulus
+        };
+        assert!(matches!(
+            s.definir_reglages(trop),
+            Err(ErreurStock::TauxInvalide(_))
+        ));
+        assert_eq!(s.reglages(), voulus);
     }
 }

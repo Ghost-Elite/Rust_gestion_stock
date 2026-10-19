@@ -1,11 +1,19 @@
-//! Lecture et écriture du stock dans un fichier texte, une ligne par enregistrement :
+//! Lecture et écriture du stock dans un fichier texte, une ligne par enregistrement
+//! (format version 2) :
 //!
 //! ```text
-//! P;Café 250g;7;2     produit : nom ; quantité ; seuil
-//! M;E;Café 250g;10    mouvement : E (entrée) ou S (sortie) ; nom ; quantité
+//! F;2                           version du format
+//! R;europe;EUR;2000             réglages : profil ; devise ; taux par défaut (centièmes de %)
+//! P;Café 250g;7;2;350;550       produit : nom ; quantité ; seuil ; prix ; taux (vides s'ils manquent)
+//! M;E;Café 250g;10              mouvement : E (entrée) ou S (sortie) ; nom ; quantité
 //! ```
+//!
+//! Les fichiers de l'ancien format (sans ligne `F`, produits à quatre champs) se lisent
+//! toujours, sans perte.
 
 use crate::erreur::ErreurStock;
+use crate::monnaie::{Devise, Montant};
+use crate::reglages::{Profil, Reglages};
 use crate::stock::{Genre, Mouvement, Stock};
 use std::fs;
 use std::io::{ErrorKind, Write};
@@ -57,12 +65,18 @@ pub fn charger(chemin: &Path) -> Result<Stock, ErreurStock> {
 fn lire_ligne(stock: &mut Stock, ligne: &str) -> Option<()> {
     let champs: Vec<&str> = ligne.split(';').collect();
     match champs.as_slice() {
-        ["P", nom, quantite, seuil] => {
-            let quantite: u32 = quantite.parse().ok()?;
-            let seuil: u32 = seuil.parse().ok()?;
-            stock.ajouter_produit(nom, seuil).ok()?;
-            stock.produits.last_mut()?.quantite = quantite;
-            Some(())
+        ["F", version] => (*version == "2").then_some(()),
+        ["R", profil, devise, taux] => {
+            let reglages = Reglages {
+                profil: Profil::depuis_code(profil)?,
+                devise: Devise::depuis_code(devise)?,
+                taux_defaut_bp: taux.parse().ok()?,
+            };
+            stock.definir_reglages(reglages).ok()
+        }
+        ["P", nom, quantite, seuil] => lire_produit(stock, nom, quantite, seuil, "", ""),
+        ["P", nom, quantite, seuil, prix, taux] => {
+            lire_produit(stock, nom, quantite, seuil, prix, taux)
         }
         ["M", genre, nom, quantite] => {
             let genre = match *genre {
@@ -81,14 +95,55 @@ fn lire_ligne(stock: &mut Stock, ligne: &str) -> Option<()> {
     }
 }
 
+/// Ajoute un produit lu dans le fichier. `prix` et `taux` vides veulent dire « pas défini ».
+fn lire_produit(
+    stock: &mut Stock,
+    nom: &str,
+    quantite: &str,
+    seuil: &str,
+    prix: &str,
+    taux: &str,
+) -> Option<()> {
+    let quantite: u32 = quantite.parse().ok()?;
+    let seuil: u32 = seuil.parse().ok()?;
+    let prix = match prix {
+        "" => None,
+        texte => Some(Montant(texte.parse().ok()?)),
+    };
+    let taux = match taux {
+        "" => None,
+        texte => Some(texte.parse().ok()?),
+    };
+    stock.ajouter_produit(nom, seuil).ok()?;
+    // Vérifie aussi les bornes : prix négatif ou énorme, taux au-delà de 100 %.
+    stock.definir_prix(nom, prix, taux).ok()?;
+    stock.produits.last_mut()?.quantite = quantite;
+    Some(())
+}
+
 /// Écrit tout le stock. On écrit d'abord dans `<fichier>.tmp`, on force l'écriture sur le
 /// disque, puis on renomme : si le programme ou l'ordinateur s'arrête en cours de route,
 /// c'est l'ancien fichier complet ou le nouveau fichier complet qui reste, jamais un fichier vide.
 pub fn sauvegarder(stock: &Stock, chemin: &Path) -> Result<(), ErreurStock> {
-    let produits = stock
-        .produits
-        .iter()
-        .map(|p| format!("P;{};{};{}\n", p.nom, p.quantite, p.seuil));
+    let entete = {
+        let r = stock.reglages;
+        format!(
+            "F;2\nR;{};{};{}\n",
+            r.profil.code(),
+            r.devise.code(),
+            r.taux_defaut_bp
+        )
+    };
+    let produits = stock.produits.iter().map(|p| {
+        format!(
+            "P;{};{};{};{};{}\n",
+            p.nom,
+            p.quantite,
+            p.seuil,
+            p.prix.map_or(String::new(), |m| m.0.to_string()),
+            p.taux_bp.map_or(String::new(), |t| t.to_string())
+        )
+    });
     let mouvements = stock.historique.iter().map(|m| {
         let genre = match m.genre {
             Genre::Entree => "E",
@@ -96,7 +151,10 @@ pub fn sauvegarder(stock: &Stock, chemin: &Path) -> Result<(), ErreurStock> {
         };
         format!("M;{genre};{};{}\n", m.nom, m.quantite)
     });
-    let texte: String = produits.chain(mouvements).collect();
+    let texte: String = std::iter::once(entete)
+        .chain(produits)
+        .chain(mouvements)
+        .collect();
 
     let io = |e: std::io::Error| erreur_io(chemin, e);
     let temporaire = chemin_temporaire(chemin);
@@ -243,5 +301,90 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&voisin).unwrap(), "précieux");
         std::fs::remove_file(&chemin).unwrap();
         std::fs::remove_file(&voisin).unwrap();
+    }
+
+    #[test]
+    fn aller_retour_v2_conserve_prix_taux_et_reglages() {
+        use crate::monnaie::{Devise, Montant};
+        use crate::reglages::{Profil, Reglages};
+        let mut s = Stock::nouveau();
+        s.definir_reglages(Reglages {
+            profil: Profil::EtatsUnis,
+            devise: Devise::Usd,
+            taux_defaut_bp: 825,
+        })
+        .unwrap();
+        s.ajouter_produit("Pain", 5).unwrap();
+        s.ajouter_produit("Lait", 2).unwrap();
+        s.ajouter_produit("Sel", 1).unwrap();
+        s.definir_prix("Pain", Some(Montant(120)), Some(550))
+            .unwrap();
+        s.definir_prix("Lait", Some(Montant(95)), None).unwrap();
+        s.enregistrer_entree("Pain", 7).unwrap();
+        let chemin = chemin_temp("v2");
+        sauvegarder(&s, &chemin).unwrap();
+        let texte = std::fs::read_to_string(&chemin).unwrap();
+        assert!(texte.starts_with("F;2\nR;etats-unis;USD;825\n"), "{texte}");
+        let relu = charger(&chemin).unwrap();
+        assert_eq!(relu.produits(), s.produits());
+        assert_eq!(relu.reglages(), s.reglages());
+        assert_eq!(relu.historique(), s.historique());
+        std::fs::remove_file(&chemin).unwrap();
+    }
+
+    #[test]
+    fn un_fichier_de_l_ancien_format_se_lit_sans_perte() {
+        use crate::reglages::Reglages;
+        let chemin = chemin_temp("ancien");
+        std::fs::write(&chemin, "P;Riz;12;5\nM;E;Riz;12\n").unwrap();
+        let s = charger(&chemin).unwrap();
+        let p = &s.produits()[0];
+        assert_eq!((p.nom.as_str(), p.quantite, p.seuil), ("Riz", 12, 5));
+        assert_eq!((p.prix, p.taux_bp), (None, None));
+        assert_eq!(s.historique().len(), 1);
+        assert_eq!(s.reglages(), Reglages::default());
+        std::fs::remove_file(&chemin).unwrap();
+    }
+
+    #[test]
+    fn un_prix_ou_un_taux_illisible_donne_fichier_corrompu_avec_la_ligne() {
+        for (contenu, ligne) in [
+            ("F;2\nP;Riz;1;0;abc;\n", 2),
+            ("F;2\nP;Riz;1;0;-5;\n", 2),
+            ("F;2\nP;Riz;1;0;;abc\n", 2),
+            ("F;2\nP;Riz;1;0;;10001\n", 2),
+            ("F;2\nP;Riz;1;0;1000000001;\n", 2),
+            ("F;2\nP;Riz;1;0;100\n", 2), // cinq champs : ni l'ancien format ni le nouveau
+        ] {
+            let chemin = chemin_temp("prix-illisible");
+            std::fs::write(&chemin, contenu).unwrap();
+            assert_eq!(
+                charger(&chemin).unwrap_err(),
+                ErreurStock::FichierCorrompu { ligne },
+                "{contenu:?}"
+            );
+            std::fs::remove_file(&chemin).unwrap();
+        }
+    }
+
+    #[test]
+    fn une_ligne_r_ou_une_version_illisible_donne_fichier_corrompu() {
+        for (contenu, ligne) in [
+            ("F;2\nR;mars;EUR;2000\n", 2),
+            ("F;2\nR;europe;JPY;2000\n", 2),
+            ("F;2\nR;europe;EUR;abc\n", 2),
+            ("F;2\nR;europe;EUR;10001\n", 2),
+            ("F;3\n", 1),
+            ("F;\n", 1),
+        ] {
+            let chemin = chemin_temp("reglages-illisibles");
+            std::fs::write(&chemin, contenu).unwrap();
+            assert_eq!(
+                charger(&chemin).unwrap_err(),
+                ErreurStock::FichierCorrompu { ligne },
+                "{contenu:?}"
+            );
+            std::fs::remove_file(&chemin).unwrap();
+        }
     }
 }
