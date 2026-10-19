@@ -153,3 +153,34 @@ fn apercu_vente_etroite() {
         vente_en_cours("vente-etroite"),
     );
 }
+
+#[test]
+#[ignore = "outil de design : lancer à la main"]
+fn apercu_ventes() {
+    let mut app = vente_en_cours("ventes");
+    let etat = app.etat.as_mut().unwrap();
+    assert!(etat.encaisser(&app.panier, Moyen::Especes, "20"));
+    assert!(etat.encaisser(&[("Lait concentré".to_string(), 3)], Moyen::Carte, ""));
+    app.panier.clear();
+    app.onglet = Onglet::Ventes;
+    app.annulation_en_attente = Some(1);
+    capturer("ventes", Vec2::new(1100.0, 720.0), app);
+}
+
+#[test]
+#[ignore = "outil de design : lancer à la main"]
+fn apercu_reglages() {
+    let mut app = application_exemple("reglages");
+    app.onglet = Onglet::Reglages;
+    capturer("reglages", Vec2::new(1100.0, 720.0), app);
+}
+
+#[test]
+#[ignore = "outil de design : lancer à la main"]
+fn apercu_stock_avec_prix() {
+    let mut app = application_exemple("stock-prix");
+    app.selection = Some("Riz parfumé 5kg".into());
+    app.saisie_prix_produit = "8,90".into();
+    app.saisie_taux_produit = "5,5".into();
+    capturer("stock_avec_prix", Vec2::new(1100.0, 900.0), app);
+}

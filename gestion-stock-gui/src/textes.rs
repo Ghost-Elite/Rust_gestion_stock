@@ -70,6 +70,44 @@ pub const MENTION_NON_CERTIFIE: &str =
     "Ticket non fiscal : ce programme n'est pas une caisse certifiée.";
 pub const LIBELLE_RENDU: &str = "Rendu de monnaie";
 
+pub const ONGLET_VENTES: &str = "Ventes";
+pub const ONGLET_REGLAGES: &str = "Réglages";
+
+pub const SECTION_VENTES: &str = "Journal des ventes";
+pub const AUCUNE_VENTE: &str = "Aucune vente enregistrée.";
+pub const BOUTON_ANNULER_VENTE: &str = "Annuler la vente";
+pub const BOUTON_CONFIRMER_ANNULATION: &str = "Confirmer l'annulation";
+pub const BOUTON_GARDER_VENTE: &str = "Garder la vente";
+pub const JOURNAL_ALTERE_SUITE: &str = "Les ventes et les annulations sont bloquées ; le stock reste utilisable. Restaurez une copie du fichier de données pour vendre à nouveau.";
+
+pub const SECTION_REGLAGES: &str = "Réglages de la caisse";
+pub const LIBELLE_PROFIL: &str = "Prix et taxes";
+pub const PROFIL_EUROPE: &str = "Europe (prix TTC)";
+pub const PROFIL_ETATS_UNIS: &str = "États-Unis (prix hors taxe)";
+pub const LIBELLE_DEVISE: &str = "Devise";
+pub const DEVISE_EUR: &str = "EUR (€)";
+pub const DEVISE_USD: &str = "USD ($)";
+pub const DEVISE_GBP: &str = "GBP (£)";
+pub const DEVISE_XOF: &str = "XOF (FCFA)";
+pub const CHAMP_TAUX_DEFAUT: &str = "Taux par défaut (%)";
+pub const BOUTON_ENREGISTRER_REGLAGES: &str = "Enregistrer les réglages";
+pub const RAPPEL_REGLAGES: &str = "Vérifiez ces réglages avant de vendre.";
+pub const MENTION_CAISSE_NON_CERTIFIEE: &str = "Ce programme n'est pas une caisse certifiée.";
+pub const REGLAGES_VERROUILLES: &str = "La devise et le mode de prix ne se changent plus après la première vente : le journal garde chaque montant dans sa devise d'origine. Le taux par défaut reste modifiable.";
+pub const EXPLICATION_EUROPE: &str =
+    "Les prix saisis sont TTC (TVA comprise) : le ticket montre la TVA contenue dans le total.";
+pub const EXPLICATION_ETATS_UNIS: &str =
+    "Les prix saisis sont hors taxe : la taxe de vente s'ajoute au total, par taux.";
+
+pub const CHAMP_PRIX_AJOUT: &str = "Prix (facultatif)";
+pub const CHAMP_TAUX_AJOUT: &str = "Taux de TVA ou de taxe, en % (facultatif)";
+pub const CHAMP_PRIX: &str = "Prix du produit";
+pub const CHAMP_TAUX: &str = "Taux de TVA ou de taxe du produit, en % (facultatif)";
+pub const BOUTON_ENREGISTRER_PRIX: &str = "Enregistrer le prix";
+pub const SANS_PRIX: &str = "Pas de prix";
+pub const PRIX_VIDE_RETIRE: &str =
+    "Un prix vide retire le prix : le produit ne pourra plus être vendu.";
+
 pub const ERREUR_OUVERTURE_TITRE: &str = "Impossible d'ouvrir le fichier de données";
 pub const ERREUR_OUVERTURE_AIDE: &str = "Rien n'a été modifié. Corrigez le fichier, ou indiquez un autre emplacement avec la variable STOCK_FICHIER, puis relancez le programme.";
 pub const BOUTON_QUITTER: &str = "Quitter";
@@ -162,4 +200,30 @@ pub fn libelle_taxe(profil: Profil, taux: &str) -> String {
 /// Un stock sous le seuil d'alerte s'écrit aussi en toutes lettres sur la tuile.
 pub fn stock_bas(quantite: u32) -> String {
     format!("{quantite} en stock (bas)")
+}
+
+pub fn annuler_la_vente(numero: u64) -> String {
+    format!("Annuler la vente n° {numero}")
+}
+
+pub fn confirmation_annulation(numero: u64, total: &str) -> String {
+    format!(
+        "Annuler la vente n° {numero} ({total}) ? Le stock sera remis et une écriture d'annulation sera ajoutée au journal : la vente reste visible, rien n'est effacé."
+    )
+}
+
+pub fn titre_de_piece(numero: u64, libelle: &str) -> String {
+    format!("n° {numero} : {libelle}")
+}
+
+pub fn detail_de_piece(quand: &str, moyen: &str) -> String {
+    format!("{quand} · {moyen}")
+}
+
+pub fn prix_court(prix: &str) -> String {
+    format!("Prix : {prix}")
+}
+
+pub fn journal_altere(message: &str) -> String {
+    format!("{message} {JOURNAL_ALTERE_SUITE}")
 }

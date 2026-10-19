@@ -31,6 +31,8 @@ pub struct LigneProduit {
     pub en_alerte: bool,
     /// `None` : le produit n'a pas de prix, on ne peut pas le vendre.
     pub prix: Option<Montant>,
+    /// `None` : le produit suit le taux par défaut des réglages.
+    pub taux_bp: Option<u32>,
 }
 
 /// Où en est un règlement en espèces, pour l'afficher pendant la saisie.
@@ -232,6 +234,7 @@ impl Etat {
                 seuil: p.seuil,
                 en_alerte: p.en_alerte(),
                 prix: p.prix,
+                taux_bp: p.taux_bp,
             })
             .collect()
     }
@@ -395,6 +398,33 @@ impl Etat {
 
     pub fn reglages(&self) -> Reglages {
         self.stock.reglages()
+    }
+
+    /// Les réglages ne se changent plus après la première vente : le journal garde les montants
+    /// dans la devise d'origine.
+    pub fn reglages_verrouilles(&self) -> bool {
+        !self.stock.pieces().is_empty()
+    }
+
+    /// Le prix et le taux d'un produit écrits comme dans un champ de saisie (vides s'il n'y en
+    /// a pas), pour pré-remplir le formulaire : réenregistrer sans rien changer ne change rien.
+    pub fn saisies_du_prix(&self, nom: &str) -> (String, String) {
+        let devise = self.stock.reglages().devise;
+        self.lignes("", false)
+            .into_iter()
+            .find(|ligne| ligne.nom == nom)
+            .map_or_else(Default::default, |ligne| {
+                (
+                    ligne
+                        .prix
+                        .map(|p| devise.formater_brut(p))
+                        .unwrap_or_default(),
+                    ligne
+                        .taux_bp
+                        .map(|t| devise.formater_taux_brut(t))
+                        .unwrap_or_default(),
+                )
+            })
     }
 
     /// Un montant écrit avec la devise des réglages.
@@ -655,7 +685,8 @@ mod tests {
                 quantite: 0,
                 seuil: 5,
                 en_alerte: true,
-                prix: None
+                prix: None,
+                taux_bp: None
             }]
         );
         assert!(
@@ -1234,5 +1265,36 @@ mod tests {
         // Un panier vide n'a rien à encaisser.
         assert_eq!(e.reglement_especes(Montant(0), "5"), Reglement::Attente);
         assert!(e.derniere_piece().is_none());
+    }
+
+    #[test]
+    fn le_prix_et_le_taux_d_un_produit_se_redonnent_comme_on_les_a_tapes() {
+        let mut e = etat_vendeur("saisies-prix");
+        assert!(e.ajouter("Thé", "0"));
+        assert_eq!(
+            e.saisies_du_prix("Pain"),
+            ("1,20".to_string(), "5,5".to_string())
+        );
+        // Pas de taux propre : le champ reste vide, le taux par défaut s'applique.
+        assert_eq!(
+            e.saisies_du_prix("Savon"),
+            ("2,50".to_string(), String::new())
+        );
+        assert_eq!(e.saisies_du_prix("Thé"), (String::new(), String::new()));
+        assert_eq!(e.saisies_du_prix("Inconnu"), (String::new(), String::new()));
+        // Ce qu'on relit est accepté tel quel par le formulaire : rien ne change au réenregistrement.
+        let (prix, taux) = e.saisies_du_prix("Pain");
+        assert!(e.definir_prix("Pain", &prix, &taux));
+        assert_eq!(e.saisies_du_prix("Pain"), (prix, taux));
+        assert_eq!(ligne(&e, "Pain").taux_bp, Some(550));
+        assert_eq!(ligne(&e, "Savon").taux_bp, None);
+    }
+
+    #[test]
+    fn les_reglages_sont_verrouilles_des_la_premiere_piece() {
+        let mut e = etat_vendeur("verrou");
+        assert!(!e.reglages_verrouilles());
+        assert!(e.encaisser(&panier(&[("Pain", 1)]), Moyen::Carte, ""));
+        assert!(e.reglages_verrouilles());
     }
 }

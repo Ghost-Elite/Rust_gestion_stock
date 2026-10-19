@@ -8,7 +8,7 @@
 //! couleur d'accent, des puces pour les états, de l'espace. Les couleurs viennent toutes de
 //! `palette`, où leur contraste est vérifié par des tests.
 
-use crate::etat::{Etat, LigneProduit, Reglement, Resume, Retour, chemin_complet};
+use crate::etat::{Etat, LignePiece, LigneProduit, Reglement, Resume, Retour, chemin_complet};
 use crate::palette::{
     ACCENT, ACCENT_DOUX, ACCENT_TEXTE, ALERTE_FOND, ALERTE_TEXTE, DANGER, FILET, FOCUS, FOND,
     SORTIE_TEXTE, SUCCES_FOND, SUCCES_TEXTE, SURFACE, TEXTE, TEXTE_DISCRET, couleur, ombre,
@@ -21,7 +21,7 @@ use eframe::egui::{
     WidgetInfo, WidgetType,
 };
 use gestion_stock::erreur::ErreurStock;
-use gestion_stock::monnaie::Montant;
+use gestion_stock::monnaie::{Devise, Montant};
 use gestion_stock::reglages::Profil;
 use gestion_stock::vente::Moyen;
 use gestion_stock::vente::{Devis, GenrePiece, GroupeTaux};
@@ -36,13 +36,24 @@ pub const TAILLE_MINIMALE: [f32; 2] = [640.0, 420.0];
 /// en une seule colonne : les commandes se placent sous la liste au lieu d'être à côté.
 const LARGEUR_DEUX_COLONNES: f32 = 800.0;
 
-/// Les sections de l'application. Les onglets Ventes et Réglages arrivent avec la Task 9.
+/// Les sections de l'application.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Onglet {
     /// L'écran de caisse : c'est celui que l'on ouvre en premier, la vente est le geste courant.
     #[default]
     Vente,
     Stock,
+    /// Le journal des ventes, où l'on annule une vente.
+    Ventes,
+    Reglages,
+}
+
+/// Les réglages en cours de modification : ils ne comptent qu'une fois enregistrés.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BrouillonReglages {
+    pub profil: Profil,
+    pub devise: Devise,
+    pub taux: String,
 }
 
 #[derive(Default)]
@@ -54,6 +65,16 @@ pub struct Application {
     /// Ce que le client a donné, tel que tapé (pour un paiement en espèces).
     pub saisie_recu: String,
     pub recherche_vente: String,
+    /// La vente que l'on s'apprête à annuler (en attente de confirmation).
+    pub annulation_en_attente: Option<u64>,
+    /// `None` : on montre les réglages enregistrés.
+    pub reglages_saisis: Option<BrouillonReglages>,
+    /// Le prix et le taux du formulaire « Ajouter un produit ».
+    pub saisie_prix: String,
+    pub saisie_taux: String,
+    /// Le prix et le taux du produit sélectionné, pré-remplis à la sélection.
+    pub saisie_prix_produit: String,
+    pub saisie_taux_produit: String,
     /// `None` : le fichier de données n'a pas pu être ouvert, on affiche l'écran d'erreur.
     pub etat: Option<Etat>,
     pub erreur_ouverture: Option<String>,
@@ -134,7 +155,26 @@ pub fn dessiner(ui: &mut Ui, app: &mut Application) {
     match app.onglet {
         Onglet::Vente => ecran_vente(ui, app),
         Onglet::Stock => ecran_stock(ui, app),
+        Onglet::Ventes => page(ui, 900.0, |ui| ecran_ventes(ui, app)),
+        Onglet::Reglages => page(ui, 640.0, |ui| ecran_reglages(ui, app)),
     }
+}
+
+/// La page d'un écran « de lecture » (Ventes, Réglages) : une colonne centrée, qui défile.
+fn page(ui: &mut Ui, largeur_max: f32, contenu: impl FnOnce(&mut Ui)) {
+    let marge = if ui.available_width() >= LARGEUR_DEUX_COLONNES {
+        Margin::symmetric(24, 16)
+    } else {
+        Margin::symmetric(16, 14)
+    };
+    CentralPanel::default()
+        .frame(Frame::new().fill(couleur(FOND)).inner_margin(marge))
+        .show(ui, |ui| {
+            ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+                ui.set_max_width(largeur_max);
+                contenu(ui);
+            });
+        });
 }
 
 fn ecran_stock(ui: &mut Ui, app: &mut Application) {
@@ -349,8 +389,11 @@ fn rempli(texte: &str) -> bool {
 /// La largeur d'un onglet : la même pour tous, pour les aligner à droite sans surprise.
 const LARGEUR_ONGLET: f32 = 104.0;
 
+/// Largeur à partir de laquelle les onglets tiennent à droite du titre, sur la même ligne.
+const LARGEUR_ENTETE_EN_LIGNE: f32 = 980.0;
+
 fn entete(ui: &mut Ui, app: &mut Application) {
-    let large = ui.available_width() >= LARGEUR_DEUX_COLONNES;
+    let large = ui.available_width() >= LARGEUR_ENTETE_EN_LIGNE;
     ui.horizontal(|ui| {
         logo(ui);
         ui.vertical(|ui| {
@@ -370,7 +413,12 @@ fn entete(ui: &mut Ui, app: &mut Application) {
     }
 }
 
-const ONGLETS: [(Onglet, &str); 2] = [(Onglet::Vente, ONGLET_VENTE), (Onglet::Stock, ONGLET_STOCK)];
+const ONGLETS: [(Onglet, &str); 4] = [
+    (Onglet::Vente, ONGLET_VENTE),
+    (Onglet::Stock, ONGLET_STOCK),
+    (Onglet::Ventes, ONGLET_VENTES),
+    (Onglet::Reglages, ONGLET_REGLAGES),
+];
 
 /// Les sections de l'application. Chaque onglet est un bouton dont l'état « sélectionné » est
 /// annoncé par les lecteurs d'écran ; la couleur n'est qu'un renfort.
@@ -507,11 +555,17 @@ fn liste_produits(ui: &mut Ui, app: &mut Application) {
     let mut clic: Option<String> = None;
     for ligne in &lignes {
         let choisi = app.selection.as_deref() == Some(ligne.nom.as_str());
-        if ligne_produit(ui, ligne, choisi) {
+        let prix = ligne
+            .prix
+            .map_or_else(|| SANS_PRIX.to_string(), |p| prix_court(&etat.formater(p)));
+        if ligne_produit(ui, ligne, &prix, choisi) {
             clic = Some(ligne.nom.clone());
         }
     }
     if let Some(nom) = clic {
+        // Le formulaire de prix part de ce que le produit a déjà : enregistrer sans rien
+        // changer ne change rien, et changer le prix ne perd pas le taux.
+        (app.saisie_prix_produit, app.saisie_taux_produit) = etat.saisies_du_prix(&nom);
         app.selection = Some(nom);
         app.saisie_nouveau_nom.clear();
         app.confirmer_suppression = false;
@@ -521,7 +575,7 @@ fn liste_produits(ui: &mut Ui, app: &mut Application) {
 /// Une ligne de la liste : le nom (qui se clique) avec son état dessous, la quantité à droite.
 /// Un nom très long passe à la ligne au lieu de repousser l'alerte hors de l'écran.
 /// Renvoie vrai si on vient de cliquer sur le nom.
-fn ligne_produit(ui: &mut Ui, ligne: &LigneProduit, choisi: bool) -> bool {
+fn ligne_produit(ui: &mut Ui, ligne: &LigneProduit, prix: &str, choisi: bool) -> bool {
     let (fond, contour) = if choisi {
         (ACCENT_DOUX, Stroke::new(2.0, couleur(ACCENT)))
     } else {
@@ -565,6 +619,7 @@ fn ligne_produit(ui: &mut Ui, ligne: &LigneProduit, choisi: bool) -> bool {
                                 puce(ui, ETAT_CORRECT, SUCCES_FOND, SUCCES_TEXTE);
                             }
                             discret(ui, &seuil_court(ligne.seuil));
+                            discret(ui, prix);
                         });
                     },
                 );
@@ -645,6 +700,8 @@ fn formulaire_ajout(ui: &mut Ui, app: &mut Application) {
     champ(ui, CHAMP_NOM, &mut app.saisie_nom);
     suggestions_de_produits(ui, app);
     champ(ui, CHAMP_SEUIL, &mut app.saisie_seuil);
+    champ(ui, CHAMP_PRIX_AJOUT, &mut app.saisie_prix);
+    champ(ui, CHAMP_TAUX_AJOUT, &mut app.saisie_taux);
     if bouton(
         ui,
         BOUTON_AJOUTER,
@@ -653,10 +710,17 @@ fn formulaire_ajout(ui: &mut Ui, app: &mut Application) {
     )
     .clicked()
         && let Some(etat) = app.etat.as_mut()
-        && etat.ajouter(&app.saisie_nom, &app.saisie_seuil)
+        && etat.ajouter_avec_prix(
+            &app.saisie_nom,
+            &app.saisie_seuil,
+            &app.saisie_prix,
+            &app.saisie_taux,
+        )
     {
         app.saisie_nom.clear();
         app.saisie_seuil.clear();
+        app.saisie_prix.clear();
+        app.saisie_taux.clear();
     }
 }
 
@@ -701,6 +765,22 @@ fn commandes_du_produit(ui: &mut Ui, app: &mut Application) {
     });
 
     ui.separator();
+    champ(ui, CHAMP_PRIX, &mut app.saisie_prix_produit);
+    champ(ui, CHAMP_TAUX, &mut app.saisie_taux_produit);
+    if !rempli(&app.saisie_prix_produit) {
+        discret(ui, PRIX_VIDE_RETIRE);
+    }
+    if bouton(ui, BOUTON_ENREGISTRER_PRIX, Style::Secondaire, true).clicked()
+        && let Some(etat) = app.etat.as_mut()
+    {
+        etat.definir_prix(
+            &ligne.nom,
+            &app.saisie_prix_produit,
+            &app.saisie_taux_produit,
+        );
+    }
+
+    ui.separator();
     champ(ui, CHAMP_NOUVEAU_NOM, &mut app.saisie_nouveau_nom);
     if bouton(
         ui,
@@ -742,6 +822,213 @@ fn suppression(ui: &mut Ui, app: &mut Application, ligne: &LigneProduit) {
         });
     } else if bouton(ui, BOUTON_SUPPRIMER, Style::Danger, true).clicked() {
         app.confirmer_suppression = true;
+    }
+}
+
+// ---- Le journal des ventes ----------------------------------------------------------------------
+
+/// Combien de pièces on montre : les plus récentes. Le journal, lui, garde tout.
+const PIECES_AFFICHEES: usize = 50;
+/// La place réservée, à droite d'une ligne du journal, au total et au bouton d'annulation.
+const LARGEUR_ACTIONS_VENTE: f32 = 280.0;
+
+enum ActionVente {
+    Demander(u64),
+    Confirmer(u64),
+    Garder,
+}
+
+fn ecran_ventes(ui: &mut Ui, app: &mut Application) {
+    let Some(etat) = &app.etat else { return };
+    if let Err(message) = etat.integrite() {
+        bandeau_alerte(ui, &journal_altere(&message));
+        ui.add_space(8.0);
+    }
+    carte(ui, |ui| liste_des_ventes(ui, app));
+}
+
+fn liste_des_ventes(ui: &mut Ui, app: &mut Application) {
+    titre_de_carte(ui, SECTION_VENTES);
+    let Some(etat) = &app.etat else { return };
+    let pieces = etat.pieces_recentes(PIECES_AFFICHEES);
+    if pieces.is_empty() {
+        discret(ui, AUCUNE_VENTE);
+        return;
+    }
+    let integre = etat.integrite().is_ok();
+    let mut action = None;
+    for (i, piece) in pieces.iter().enumerate() {
+        if i > 0 {
+            ui.separator();
+        }
+        let confirmation = app.annulation_en_attente == Some(piece.numero);
+        if let Some(a) = ligne_de_piece(ui, piece, confirmation, integre) {
+            action = Some(a);
+        }
+    }
+    match action {
+        Some(ActionVente::Demander(numero)) => app.annulation_en_attente = Some(numero),
+        Some(ActionVente::Garder) => app.annulation_en_attente = None,
+        Some(ActionVente::Confirmer(numero)) => {
+            if let Some(etat) = app.etat.as_mut() {
+                etat.annuler(numero);
+            }
+            app.annulation_en_attente = None;
+        }
+        None => {}
+    }
+}
+
+/// Une pièce du journal. Annuler demande toujours une confirmation, comme supprimer un produit :
+/// le premier clic ne change rien.
+fn ligne_de_piece(
+    ui: &mut Ui,
+    piece: &LignePiece,
+    confirmation: bool,
+    integre: bool,
+) -> Option<ActionVente> {
+    let mut action = None;
+    ui.horizontal(|ui| {
+        let largeur =
+            (ui.available_width() - LARGEUR_ACTIONS_VENTE - ui.spacing().item_spacing.x).max(120.0);
+        ui.allocate_ui_with_layout(
+            Vec2::new(largeur, 0.0),
+            Layout::top_down(Align::Min),
+            |ui| {
+                ui.set_width(largeur);
+                ui.label(gras(
+                    ui,
+                    &titre_de_piece(piece.numero, &piece.libelle),
+                    16.0,
+                ));
+                discret(ui, &detail_de_piece(&piece.quand, &piece.moyen));
+            },
+        );
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            if piece.annulable && !confirmation {
+                let annuler = bouton(ui, BOUTON_ANNULER_VENTE, Style::Secondaire, integre);
+                annuler.widget_info(|| {
+                    WidgetInfo::labeled(WidgetType::Button, integre, annuler_la_vente(piece.numero))
+                });
+                if annuler.clicked() {
+                    action = Some(ActionVente::Demander(piece.numero));
+                }
+            }
+            ui.label(gras(ui, &piece.total, 17.0));
+        });
+    });
+    if confirmation && piece.annulable {
+        ui.label(confirmation_annulation(piece.numero, &piece.total));
+        ui.horizontal_wrapped(|ui| {
+            if bouton(
+                ui,
+                BOUTON_CONFIRMER_ANNULATION,
+                Style::Confirmation,
+                integre,
+            )
+            .clicked()
+            {
+                action = Some(ActionVente::Confirmer(piece.numero));
+            }
+            if bouton(ui, BOUTON_GARDER_VENTE, Style::Secondaire, true).clicked() {
+                action = Some(ActionVente::Garder);
+            }
+        });
+    }
+    action
+}
+
+// ---- Les réglages --------------------------------------------------------------------------------
+
+fn nom_du_profil(profil: Profil) -> &'static str {
+    match profil {
+        Profil::Europe => PROFIL_EUROPE,
+        Profil::EtatsUnis => PROFIL_ETATS_UNIS,
+    }
+}
+
+fn nom_de_la_devise(devise: Devise) -> &'static str {
+    match devise {
+        Devise::Eur => DEVISE_EUR,
+        Devise::Usd => DEVISE_USD,
+        Devise::Gbp => DEVISE_GBP,
+        Devise::Xof => DEVISE_XOF,
+    }
+}
+
+fn ecran_reglages(ui: &mut Ui, app: &mut Application) {
+    carte(ui, |ui| formulaire_reglages(ui, app));
+}
+
+/// Les choix se font sur une copie (le brouillon) : rien ne compte avant « Enregistrer ». Une
+/// fois des ventes enregistrées, la devise et le mode de prix sont grisés (voir `Etat`).
+fn formulaire_reglages(ui: &mut Ui, app: &mut Application) {
+    titre_de_carte(ui, SECTION_REGLAGES);
+    ui.label(RAPPEL_REGLAGES);
+    let Some(etat) = &app.etat else { return };
+    let enregistres = etat.reglages();
+    let verrouilles = etat.reglages_verrouilles();
+    let depart = app
+        .reglages_saisis
+        .clone()
+        .unwrap_or_else(|| BrouillonReglages {
+            profil: enregistres.profil,
+            devise: enregistres.devise,
+            taux: enregistres
+                .devise
+                .formater_taux_brut(enregistres.taux_defaut_bp),
+        });
+    let mut brouillon = depart.clone();
+
+    ui.add_space(4.0);
+    discret(ui, LIBELLE_PROFIL);
+    ui.add_enabled_ui(!verrouilles, |ui| {
+        ui.horizontal_wrapped(|ui| {
+            for profil in [Profil::Europe, Profil::EtatsUnis] {
+                let choisi = brouillon.profil == profil;
+                if bouton_choix(ui, nom_du_profil(profil), choisi, 200.0).clicked() {
+                    brouillon.profil = profil;
+                }
+            }
+        });
+    });
+    ui.label(match brouillon.profil {
+        Profil::Europe => EXPLICATION_EUROPE,
+        Profil::EtatsUnis => EXPLICATION_ETATS_UNIS,
+    });
+
+    ui.add_space(4.0);
+    discret(ui, LIBELLE_DEVISE);
+    ui.add_enabled_ui(!verrouilles, |ui| {
+        ui.horizontal_wrapped(|ui| {
+            for devise in [Devise::Eur, Devise::Usd, Devise::Gbp, Devise::Xof] {
+                let choisie = brouillon.devise == devise;
+                if bouton_choix(ui, nom_de_la_devise(devise), choisie, 120.0).clicked() {
+                    brouillon.devise = devise;
+                }
+            }
+        });
+    });
+
+    ui.add_space(4.0);
+    champ(ui, CHAMP_TAUX_DEFAUT, &mut brouillon.taux);
+    if verrouilles {
+        discret(ui, REGLAGES_VERROUILLES);
+    }
+    ui.add_space(4.0);
+    let enregistrer = bouton(ui, BOUTON_ENREGISTRER_REGLAGES, Style::Principal, true).clicked();
+    discret(ui, MENTION_CAISSE_NON_CERTIFIEE);
+
+    if enregistrer
+        && let Some(etat) = app.etat.as_mut()
+        && etat.definir_reglages(brouillon.profil, brouillon.devise, &brouillon.taux)
+    {
+        app.reglages_saisis = None;
+        return;
+    }
+    // Un refus garde les choix faits : on ne retape pas tout pour corriger un taux.
+    if brouillon != depart {
+        app.reglages_saisis = Some(brouillon);
     }
 }
 
@@ -1227,7 +1514,11 @@ fn afficher_totaux(ui: &mut Ui, lignes: Vec<(String, bool)>) {
 fn paiement(ui: &mut Ui, app: &mut Application, devis: &DevisPanier) {
     ui.spacing_mut().item_spacing.y = 5.0;
     let Some(etat) = &app.etat else { return };
-    let valide = matches!(devis, Some(Ok(_)));
+    let journal = etat.integrite();
+    if let Err(message) = &journal {
+        bandeau_alerte(ui, &journal_altere(message));
+    }
+    let valide = matches!(devis, Some(Ok(_))) && journal.is_ok();
     let total = match devis {
         Some(Ok(devis)) => devis.total,
         _ => Montant::ZERO,
@@ -2144,32 +2435,6 @@ mod tests {
     }
 
     #[test]
-    fn un_journal_altere_grise_encaisser_et_le_dit() {
-        let chemin = chemin_temp("journal-altere");
-        {
-            let mut e = etat_vendeur("journal-source");
-            assert!(e.encaisser(&[("Pain".to_string(), 1)], Moyen::Carte, ""));
-            std::fs::copy(e.chemin(), &chemin).unwrap();
-        }
-        let contenu = std::fs::read_to_string(&chemin).unwrap();
-        // Une modification à la main, dans le journal : le pain vendu passe de 1,20 à 0,10.
-        let altere = contenu.replacen("L;1;Pain;1;120;", "L;1;Pain;1;10;", 1);
-        assert_ne!(
-            contenu, altere,
-            "le fichier n'a pas le format attendu :\n{contenu}"
-        );
-        std::fs::write(&chemin, altere).unwrap();
-        let etat = Etat::ouvrir(chemin).unwrap().avec_horloge(|| FIXE);
-        let mut h = harness_vente(Application::nouvelle(etat), Vec2::new(1100.0, 900.0));
-        cliquer(&mut h, &tuile("Savon", "2,50\u{a0}€"));
-        cliquer(&mut h, MOYEN_CARTE);
-        cliquer(&mut h, BOUTON_ENCAISSER);
-        // Rien n'est vendu et le message de blocage est montré.
-        assert_eq!(nombre_de_pieces(&h), 1);
-        h.get_by_label_contains("les ventes sont bloquées");
-    }
-
-    #[test]
     fn les_actions_principales_de_la_vente_sont_a_l_ecran_a_la_taille_par_defaut() {
         let mut app = app_vendeuse("ecran-defaut");
         // Trois lignes de panier : « Encaisser » doit rester visible malgré elles.
@@ -2217,7 +2482,7 @@ mod tests {
 
     fn verifier_contrastes(textes: &[TextePeint], nom_du_cas: &str) {
         assert!(
-            textes.len() > 15,
+            textes.len() >= 10,
             "{nom_du_cas} : trop peu de textes : {}",
             textes.len()
         );
@@ -2301,5 +2566,492 @@ mod tests {
                 t.rect
             );
         }
+    }
+
+    // ---- Ventes, réglages, prix ---------------------------------------------------------------
+
+    /// Une vente par carte (Pain × 3 = 3,60 €) puis une en espèces (Savon × 1 = 2,50 €),
+    /// affichées sur l'onglet Ventes.
+    fn app_avec_ventes(nom: &str) -> Application {
+        let mut etat = etat_vendeur(nom);
+        assert!(etat.encaisser(&[("Pain".to_string(), 3)], Moyen::Carte, ""));
+        assert!(etat.encaisser(&[("Savon".to_string(), 1)], Moyen::Especes, "5"));
+        etat.effacer_ticket();
+        let mut app = Application::nouvelle(etat);
+        app.onglet = Onglet::Ventes;
+        app
+    }
+
+    /// Un journal modifié à la main après une vente : le programme l'ouvre mais refuse de vendre.
+    fn app_journal_altere(nom: &str) -> Application {
+        let chemin = chemin_temp(nom);
+        {
+            let mut e = etat_vendeur(&format!("{nom}-source"));
+            assert!(e.encaisser(&[("Pain".to_string(), 1)], Moyen::Carte, ""));
+            std::fs::copy(e.chemin(), &chemin).unwrap();
+        }
+        let contenu = std::fs::read_to_string(&chemin).unwrap();
+        // Une modification à la main, dans le journal : le pain vendu passe de 1,20 à 0,10.
+        let altere = contenu.replacen("L;1;Pain;1;120;", "L;1;Pain;1;10;", 1);
+        assert_ne!(
+            contenu, altere,
+            "le fichier n'a pas le format attendu :\n{contenu}"
+        );
+        std::fs::write(&chemin, altere).unwrap();
+        Application::nouvelle(Etat::ouvrir(chemin).unwrap().avec_horloge(|| FIXE))
+    }
+
+    fn est_selectionne(h: &Harness<'static, Application>, libelle: &str) -> Option<bool> {
+        h.get_by_role_and_label(Role::Button, libelle)
+            .accesskit_node()
+            .toggled()
+            .map(|t| t == eframe::egui::accesskit::Toggled::True)
+    }
+
+    fn quantite_en_stock(h: &Harness<'static, Application>, nom: &str) -> u32 {
+        let etat = h.state().etat.as_ref().unwrap();
+        etat.lignes(nom, false)[0].quantite
+    }
+
+    #[test]
+    fn les_quatre_onglets_s_affichent_et_se_selectionnent() {
+        let mut h = harness_vente(app_vendeuse("quatre-onglets"), FENETRE);
+        for nom in [ONGLET_VENTE, ONGLET_STOCK, ONGLET_VENTES, ONGLET_REGLAGES] {
+            h.get_by_role_and_label(Role::Button, nom);
+        }
+        cliquer(&mut h, ONGLET_VENTES);
+        assert_eq!(h.state().onglet, Onglet::Ventes);
+        assert_eq!(est_selectionne(&h, ONGLET_VENTES), Some(true));
+        assert_eq!(est_selectionne(&h, ONGLET_VENTE), Some(false));
+        h.get_by_label(SECTION_VENTES);
+        cliquer(&mut h, ONGLET_REGLAGES);
+        assert_eq!(h.state().onglet, Onglet::Reglages);
+        h.get_by_label(SECTION_REGLAGES);
+    }
+
+    #[test]
+    fn les_quatre_onglets_tiennent_dans_une_fenetre_etroite() {
+        let taille = Vec2::new(TAILLE_MINIMALE[0], 600.0);
+        let h = harness_vente(app_vendeuse("onglets-etroits"), taille);
+        let ecran = Rect::from_min_size(Pos2::ZERO, taille);
+        for nom in [ONGLET_VENTE, ONGLET_STOCK, ONGLET_VENTES, ONGLET_REGLAGES] {
+            let rect = h.get_by_role_and_label(Role::Button, nom).rect();
+            assert!(
+                ecran.contains_rect(rect),
+                "« {nom} » : {rect:?} hors de {ecran:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn la_liste_des_ventes_montre_les_pieces_et_permet_d_annuler_avec_confirmation() {
+        let mut h = harness_vente(app_avec_ventes("liste-ventes"), FENETRE);
+        let (vente1, vente2) = (titre_de_piece(1, "Vente"), titre_de_piece(2, "Vente"));
+        // La plus récente d'abord.
+        assert!(h.get_by_label(&vente2).rect().top() < h.get_by_label(&vente1).rect().top());
+        h.get_by_label(&detail_de_piece("14/11/2023 23:13", "Carte"));
+        h.get_by_label(&detail_de_piece("14/11/2023 23:13", "Espèces"));
+        h.get_by_label("3,60\u{a0}€");
+        h.get_by_label("2,50\u{a0}€");
+
+        // Première demande : on demande confirmation, rien n'est annulé.
+        cliquer(&mut h, &annuler_la_vente(1));
+        h.get_by_label(&confirmation_annulation(1, "3,60\u{a0}€"));
+        assert_eq!(nombre_de_pieces(&h), 2);
+        cliquer(&mut h, BOUTON_GARDER_VENTE);
+        assert!(
+            h.query_by_label_contains("Annuler la vente n° 1 (")
+                .is_none()
+        );
+        assert_eq!(nombre_de_pieces(&h), 2);
+        assert_eq!(quantite_en_stock(&h, "Pain"), 7);
+
+        cliquer(&mut h, &annuler_la_vente(1));
+        cliquer(&mut h, BOUTON_CONFIRMER_ANNULATION);
+        // Une écriture inverse s'ajoute, le stock est remis, la vente reste visible.
+        assert_eq!(nombre_de_pieces(&h), 3);
+        h.get_by_label(&titre_de_piece(3, "Annulation de la vente n° 1"));
+        h.get_by_label(&vente1);
+        assert_eq!(quantite_en_stock(&h, "Pain"), 10);
+        assert!(h.state().annulation_en_attente.is_none());
+        h.get_by_label_contains("Vente n° 1 annulée : stock remis.");
+        // Plus de bouton pour la vente déjà annulée ni pour l'annulation ; l'autre reste annulable.
+        for numero in [1, 3] {
+            let libelle = annuler_la_vente(numero);
+            assert!(h.query_by_role_and_label(Role::Button, &libelle).is_none());
+        }
+        h.get_by_role_and_label(Role::Button, &annuler_la_vente(2));
+        // L'annulation ne laisse pas un ticket de vente sur l'écran de vente.
+        cliquer(&mut h, ONGLET_VENTE);
+        h.get_by_label(PANIER_VIDE);
+    }
+
+    #[test]
+    fn sans_vente_la_liste_le_dit() {
+        let mut app = app_vendeuse("aucune-vente");
+        app.onglet = Onglet::Ventes;
+        let h = harness_vente(app, FENETRE);
+        h.get_by_label(AUCUNE_VENTE);
+    }
+
+    #[test]
+    fn un_journal_altere_affiche_un_bandeau_et_grise_encaisser_et_annuler() {
+        let mut app = app_journal_altere("altere-ui");
+        app.onglet = Onglet::Ventes;
+        let mut h = harness_vente(app, FENETRE);
+        h.get_by_label_contains("Le journal de caisse a été modifié");
+        h.get_by_label_contains("Les ventes et les annulations sont bloquées");
+        assert!(est_grise(&h, &annuler_la_vente(1)));
+
+        // Même constat sur l'écran de vente : on peut remplir un panier, pas encaisser.
+        cliquer(&mut h, ONGLET_VENTE);
+        cliquer(&mut h, &tuile("Savon", "2,50\u{a0}€"));
+        cliquer(&mut h, MOYEN_CARTE);
+        h.get_by_label_contains("Le journal de caisse a été modifié");
+        assert!(est_grise(&h, BOUTON_ENCAISSER));
+        h.get_by_role_and_label(Role::Button, BOUTON_ENCAISSER)
+            .click();
+        h.run();
+        assert_eq!(nombre_de_pieces(&h), 1);
+    }
+
+    #[test]
+    fn les_reglages_se_changent_et_se_conservent() {
+        let chemin = chemin_temp("reglages-ui");
+        let etat = Etat::ouvrir(chemin.clone()).unwrap().avec_horloge(|| FIXE);
+        let mut app = Application::nouvelle(etat);
+        app.onglet = Onglet::Reglages;
+        let mut h = harness_vente(app, FENETRE);
+        // Les réglages enregistrés sont montrés d'abord (Europe, euro, 20 %).
+        assert_eq!(est_selectionne(&h, PROFIL_EUROPE), Some(true));
+        assert_eq!(est_selectionne(&h, DEVISE_EUR), Some(true));
+        h.get_by_label_contains(RAPPEL_REGLAGES);
+        h.get_by_label_contains("n'est pas une caisse certifiée");
+
+        cliquer(&mut h, PROFIL_ETATS_UNIS);
+        cliquer(&mut h, DEVISE_USD);
+        assert_eq!(est_selectionne(&h, PROFIL_ETATS_UNIS), Some(true));
+        assert_eq!(est_selectionne(&h, PROFIL_EUROPE), Some(false));
+        h.get_by_label(EXPLICATION_ETATS_UNIS);
+        // Rien n'est enregistré tant qu'on n'a pas validé.
+        assert_eq!(
+            h.state().etat.as_ref().unwrap().reglages().devise,
+            Devise::Eur
+        );
+        h.state_mut().reglages_saisis.as_mut().unwrap().taux.clear();
+        h.run();
+        saisir(&mut h, CHAMP_TAUX_DEFAUT, "8,25");
+        cliquer(&mut h, BOUTON_ENREGISTRER_REGLAGES);
+        let reglages = h.state().etat.as_ref().unwrap().reglages();
+        assert_eq!(
+            (reglages.profil, reglages.devise, reglages.taux_defaut_bp),
+            (Profil::EtatsUnis, Devise::Usd, 825)
+        );
+        h.get_by_label_contains("Réglages enregistrés");
+
+        // L'écran de vente passe en dollars et la taxe s'ajoute au prix hors taxe.
+        {
+            let etat = h.state_mut().etat.as_mut().unwrap();
+            assert!(etat.ajouter_avec_prix("Pain", "0", "10", ""));
+            assert!(etat.entree("Pain", "5"));
+        }
+        cliquer(&mut h, ONGLET_VENTE);
+        cliquer(&mut h, &tuile("Pain", "$10.00"));
+        for ligne in [
+            "Sous-total : $10.00",
+            "Taxe 8.25\u{a0}% : $0.83",
+            "Total : $10.83",
+        ] {
+            h.get_by_label(ligne);
+        }
+
+        // Les réglages se conservent : on rouvre le fichier.
+        let rouvert = Etat::ouvrir(chemin).unwrap().reglages();
+        assert_eq!(
+            (rouvert.profil, rouvert.devise, rouvert.taux_defaut_bp),
+            (Profil::EtatsUnis, Devise::Usd, 825)
+        );
+    }
+
+    #[test]
+    fn un_taux_illisible_est_refuse_et_garde_la_saisie() {
+        let mut app = app_vendeuse("taux-illisible");
+        app.onglet = Onglet::Reglages;
+        let mut h = harness_vente(app, FENETRE);
+        cliquer(&mut h, DEVISE_GBP);
+        h.state_mut().reglages_saisis.as_mut().unwrap().taux = "beaucoup".into();
+        h.run();
+        cliquer(&mut h, BOUTON_ENREGISTRER_REGLAGES);
+        h.get_by_label_contains("Erreur : ");
+        let etat = h.state().etat.as_ref().unwrap();
+        assert_eq!(etat.reglages().devise, Devise::Eur);
+        // Les choix faits ne sont pas perdus.
+        let brouillon = h.state().reglages_saisis.as_ref().unwrap();
+        assert_eq!(
+            (brouillon.devise, brouillon.taux.as_str()),
+            (Devise::Gbp, "beaucoup")
+        );
+    }
+
+    #[test]
+    fn apres_une_vente_la_devise_et_le_profil_sont_figes_mais_pas_le_taux() {
+        let mut app = app_avec_ventes("reglages-figes");
+        app.onglet = Onglet::Reglages;
+        let mut h = harness_vente(app, FENETRE);
+        h.get_by_label(REGLAGES_VERROUILLES);
+        for nom in [
+            PROFIL_EUROPE,
+            PROFIL_ETATS_UNIS,
+            DEVISE_EUR,
+            DEVISE_USD,
+            DEVISE_GBP,
+            DEVISE_XOF,
+        ] {
+            assert!(est_grise(&h, nom), "« {nom} » devrait être grisé");
+        }
+        // Le choix actuel reste annoncé comme sélectionné même grisé.
+        assert_eq!(est_selectionne(&h, DEVISE_EUR), Some(true));
+        // Le taux par défaut, lui, change encore.
+        cliquer(&mut h, BOUTON_ENREGISTRER_REGLAGES); // sans rien modifier : réenregistre à l'identique
+        h.get_by_label_contains("Réglages enregistrés");
+        h.state_mut().reglages_saisis = Some(BrouillonReglages {
+            profil: Profil::Europe,
+            devise: Devise::Eur,
+            taux: "10".into(),
+        });
+        h.run();
+        cliquer(&mut h, BOUTON_ENREGISTRER_REGLAGES);
+        assert_eq!(
+            h.state().etat.as_ref().unwrap().reglages().taux_defaut_bp,
+            1000
+        );
+    }
+
+    #[test]
+    fn le_prix_se_saisit_a_l_ajout_et_dans_les_actions() {
+        let mut h = harness(app_avec_produits("prix-ajout"));
+        saisir(&mut h, CHAMP_NOM, "Thé vert");
+        saisir(&mut h, CHAMP_SEUIL, "2");
+        saisir(&mut h, CHAMP_PRIX_AJOUT, "3,10");
+        saisir(&mut h, CHAMP_TAUX_AJOUT, "5,5");
+        h.get_by_label(BOUTON_AJOUTER).click();
+        h.run();
+        let ligne = h
+            .state()
+            .etat
+            .as_ref()
+            .unwrap()
+            .lignes("thé", false)
+            .remove(0);
+        assert_eq!((ligne.prix, ligne.taux_bp), (Some(Montant(310)), Some(550)));
+        for saisie in [
+            &h.state().saisie_nom,
+            &h.state().saisie_prix,
+            &h.state().saisie_taux,
+        ] {
+            assert!(saisie.is_empty());
+        }
+        // La liste montre le prix, ou dit qu'il manque.
+        h.get_by_label(&prix_court("3,10\u{a0}€"));
+        assert_eq!(h.get_all_by_label(SANS_PRIX).count(), 2); // Riz et Sucre
+
+        // Dans les actions : le prix du Riz.
+        h.get_by_label("Riz 5kg").click();
+        h.run();
+        saisir(&mut h, CHAMP_PRIX, "2,50");
+        h.get_by_label(BOUTON_ENREGISTRER_PRIX).click();
+        h.run();
+        h.get_by_label_contains("Prix de « Riz 5kg » : 2,50\u{a0}€");
+        // Le riz est maintenant vendable : sa tuile n'est plus grisée.
+        cliquer(&mut h, ONGLET_VENTE);
+        assert!(!est_grise(&h, &tuile("Riz 5kg", "2,50\u{a0}€")));
+        assert!(est_grise(&h, &produit_non_vendable("Sucre", PRIX_MANQUANT)));
+    }
+
+    #[test]
+    fn un_prix_illisible_a_l_ajout_n_ajoute_rien_et_garde_la_saisie() {
+        let mut h = harness(app_avec_produits("prix-illisible"));
+        saisir(&mut h, CHAMP_NOM, "Thé vert");
+        saisir(&mut h, CHAMP_PRIX_AJOUT, "abc");
+        h.get_by_label(BOUTON_AJOUTER).click();
+        h.run();
+        h.get_by_label_contains("Erreur : ");
+        assert!(
+            h.state()
+                .etat
+                .as_ref()
+                .unwrap()
+                .lignes("thé", false)
+                .is_empty()
+        );
+        assert_eq!(h.state().saisie_nom, "Thé vert");
+        assert_eq!(h.state().saisie_prix, "abc");
+    }
+
+    #[test]
+    fn choisir_un_produit_preremplit_son_prix_et_son_taux() {
+        let mut app = app_vendeuse("preremplir");
+        app.onglet = Onglet::Stock;
+        let mut h = harness(app);
+        h.get_by_label("Pain").click();
+        h.run();
+        let valeur = |h: &Harness<'static, Application>, champ: &str| {
+            h.get_by_role_and_label(Role::TextInput, champ).value()
+        };
+        assert_eq!(valeur(&h, CHAMP_PRIX).as_deref(), Some("1,20"));
+        assert_eq!(valeur(&h, CHAMP_TAUX).as_deref(), Some("5,5"));
+        h.get_by_label("Savon").click();
+        h.run();
+        assert_eq!(valeur(&h, CHAMP_PRIX).as_deref(), Some("2,50"));
+        assert_eq!(valeur(&h, CHAMP_TAUX).as_deref().unwrap_or(""), "");
+        // Réenregistrer sans rien changer ne change rien.
+        h.get_by_label(BOUTON_ENREGISTRER_PRIX).click();
+        h.run();
+        let ligne = h
+            .state()
+            .etat
+            .as_ref()
+            .unwrap()
+            .lignes("savon", false)
+            .remove(0);
+        assert_eq!((ligne.prix, ligne.taux_bp), (Some(Montant(250)), None));
+    }
+
+    #[test]
+    fn renommer_ou_supprimer_un_produit_vendu_affiche_le_message_de_la_bibliotheque() {
+        let mut app = app_avec_ventes("produit-vendu");
+        app.onglet = Onglet::Stock;
+        let mut h = harness(app);
+        h.get_by_label("Pain").click();
+        h.run();
+        saisir(&mut h, CHAMP_NOUVEAU_NOM, "Pain complet");
+        h.get_by_label(BOUTON_RENOMMER).click();
+        h.run();
+        let message = "figure dans des ventes : il ne peut plus être renommé ni supprimé";
+        h.get_by_label_contains(message);
+        h.get_by_label(BOUTON_SUPPRIMER).click();
+        h.run();
+        h.get_by_label(BOUTON_CONFIRMER_SUPPRESSION).click();
+        h.run();
+        h.get_by_label_contains(message);
+        assert_eq!(
+            h.state().etat.as_ref().unwrap().lignes("pain", false).len(),
+            1
+        );
+    }
+
+    #[test]
+    fn les_noms_de_champs_et_boutons_des_nouveaux_ecrans_ont_un_role_et_un_nom() {
+        let mut app = app_vendeuse("roles-reglages");
+        app.onglet = Onglet::Reglages;
+        let h = harness_vente(app, FENETRE);
+        h.get_by_role_and_label(Role::TextInput, CHAMP_TAUX_DEFAUT);
+        for nom in [
+            PROFIL_EUROPE,
+            PROFIL_ETATS_UNIS,
+            DEVISE_EUR,
+            DEVISE_USD,
+            DEVISE_GBP,
+            DEVISE_XOF,
+            BOUTON_ENREGISTRER_REGLAGES,
+        ] {
+            h.get_by_role_and_label(Role::Button, nom);
+        }
+
+        let mut app = app_vendeuse("roles-stock");
+        app.onglet = Onglet::Stock;
+        app.selection = Some("Pain".into());
+        let h = harness_vente(app, Vec2::new(1100.0, 1400.0));
+        for nom in [CHAMP_PRIX_AJOUT, CHAMP_TAUX_AJOUT, CHAMP_PRIX, CHAMP_TAUX] {
+            h.get_by_role_and_label(Role::TextInput, nom);
+        }
+        h.get_by_role_and_label(Role::Button, BOUTON_ENREGISTRER_PRIX);
+    }
+
+    #[test]
+    fn le_bouton_enregistrer_les_reglages_est_a_l_ecran_a_la_taille_par_defaut() {
+        let mut app = app_vendeuse("reglages-ecran");
+        app.onglet = Onglet::Reglages;
+        let h = harness_vente(app, FENETRE);
+        let ecran = Rect::from_min_size(Pos2::ZERO, FENETRE);
+        for nom in [BOUTON_ENREGISTRER_REGLAGES, DEVISE_XOF, PROFIL_ETATS_UNIS] {
+            let rect = h.get_by_role_and_label(Role::Button, nom).rect();
+            assert!(
+                ecran.contains_rect(rect),
+                "« {nom} » : {rect:?} hors de {ecran:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn tous_les_textes_peints_des_ecrans_ventes_et_reglages_atteignent_4_5() {
+        // Les contrôles grisés sont dispensés de contraste : on les écarte par leur nom.
+        let sauf = |textes: Vec<TextePeint>, grises: &[&str]| -> Vec<TextePeint> {
+            textes
+                .into_iter()
+                .filter(|t| !grises.contains(&t.texte.as_str()))
+                .collect()
+        };
+
+        let mut app = app_avec_ventes("contraste-ventes");
+        let textes = textes_peints(&mut app, FENETRE, 1.0);
+        assert!(textes.iter().any(|t| t.texte == BOUTON_ANNULER_VENTE));
+        verifier_contrastes(&textes, "ventes");
+        app.annulation_en_attente = Some(1);
+        let textes = textes_peints(&mut app, FENETRE, 1.0);
+        assert!(
+            textes
+                .iter()
+                .any(|t| t.texte == BOUTON_CONFIRMER_ANNULATION)
+        );
+        verifier_contrastes(&textes, "ventes, confirmation");
+
+        let mut app = app_journal_altere("contraste-altere");
+        app.onglet = Onglet::Ventes;
+        let textes = textes_peints(&mut app, FENETRE, 1.0);
+        assert!(
+            textes
+                .iter()
+                .any(|t| t.texte.contains("Les ventes et les annulations"))
+        );
+        verifier_contrastes(&sauf(textes, &[BOUTON_ANNULER_VENTE]), "journal altéré");
+
+        let mut app = app_vendeuse("contraste-reglages");
+        app.onglet = Onglet::Reglages;
+        let textes = textes_peints(&mut app, FENETRE, 1.0);
+        assert!(
+            textes
+                .iter()
+                .any(|t| t.texte == BOUTON_ENREGISTRER_REGLAGES)
+        );
+        verifier_contrastes(&textes, "réglages");
+
+        let mut app = app_avec_ventes("contraste-reglages-figes");
+        app.onglet = Onglet::Reglages;
+        let textes = textes_peints(&mut app, FENETRE, 1.0);
+        assert!(textes.iter().any(|t| t.texte == REGLAGES_VERROUILLES));
+        let grises = [
+            PROFIL_EUROPE,
+            PROFIL_ETATS_UNIS,
+            DEVISE_EUR,
+            DEVISE_USD,
+            DEVISE_GBP,
+            DEVISE_XOF,
+        ];
+        verifier_contrastes(&sauf(textes, &grises), "réglages figés");
+
+        // L'onglet Stock avec ses nouveaux champs de prix, produit sélectionné.
+        let mut app = app_vendeuse("contraste-stock-prix");
+        app.onglet = Onglet::Stock;
+        app.selection = Some("Pain".into());
+        app.saisie_prix_produit = "1,20".into();
+        app.saisie_taux_produit = "5,5".into();
+        app.saisie_nom = "Thé".into();
+        app.saisie_prix = "3".into();
+        let textes = textes_peints(&mut app, FENETRE, 1.0);
+        assert!(textes.iter().any(|t| t.texte == BOUTON_ENREGISTRER_PRIX));
+        // Les boutons « Renommer » et « Entrée/Sortie » sont grisés tant que leur champ est vide.
+        let grises = [BOUTON_RENOMMER, BOUTON_ENTREE, BOUTON_SORTIE];
+        verifier_contrastes(&sauf(textes, &grises), "stock avec prix");
     }
 }

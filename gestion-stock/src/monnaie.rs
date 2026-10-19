@@ -171,15 +171,19 @@ impl Devise {
 
     /// `20 %`, `5,5 %`, `8.25 %` selon l'usage de la devise.
     pub fn formater_taux(self, taux_bp: u32) -> String {
+        format!("{}\u{a0}%", self.formater_taux_brut(taux_bp))
+    }
+
+    /// Le nombre seul, sans le signe %, tel qu'on le retape dans un champ : `20`, `5,5`, `8.25`.
+    pub fn formater_taux_brut(self, taux_bp: u32) -> String {
         let (entier, centiemes) = (taux_bp / 100, taux_bp % 100);
-        let nombre = if centiemes == 0 {
+        if centiemes == 0 {
             entier.to_string()
         } else if centiemes % 10 == 0 {
             format!("{entier}{}{}", self.separateur_decimal(), centiemes / 10)
         } else {
             format!("{entier}{}{centiemes:02}", self.separateur_decimal())
-        };
-        format!("{nombre}\u{a0}%")
+        }
     }
 }
 
@@ -363,5 +367,21 @@ mod tests {
             Montant(i64::MAX).ajouter(Montant(1)),
             Err(ErreurStock::MontantTropGrand)
         );
+    }
+
+    #[test]
+    fn le_taux_brut_se_relit_tel_quel_dans_un_champ_de_saisie() {
+        assert_eq!(Devise::Eur.formater_taux_brut(550), "5,5");
+        assert_eq!(Devise::Eur.formater_taux_brut(2000), "20");
+        assert_eq!(Devise::Eur.formater_taux_brut(0), "0");
+        assert_eq!(Devise::Usd.formater_taux_brut(825), "8.25");
+        for devise in [Devise::Eur, Devise::Usd, Devise::Gbp, Devise::Xof] {
+            for taux in [0, 5, 550, 825, 1000, 2000, 10000] {
+                let texte = devise.formater_taux_brut(taux);
+                assert_eq!(lire_taux(&texte), Ok(taux), "{devise:?} {texte}");
+            }
+        }
+        // `formater_taux` ajoute seulement l'espace insécable et le signe %.
+        assert_eq!(Devise::Eur.formater_taux(550), "5,5\u{a0}%");
     }
 }
