@@ -2,7 +2,9 @@
 
 Un petit programme en ligne de commande pour suivre le stock d'une boutique : produits, entrées de marchandise, sorties (ventes, pertes), alertes quand un produit est bientôt épuisé, et historique des mouvements.
 
-Tout est écrit en Rust, sans bibliothèque externe. Les données sont gardées dans un simple fichier texte.
+Tout est écrit en Rust. La seule bibliothèque externe est `sha2` (les empreintes SHA-256 du journal des ventes, utilisé par l'interface graphique). Les données sont gardées dans un simple fichier texte.
+
+> **Cette version ne vend pas** : les prix, les ventes, les tickets et les annulations se font dans l'interface graphique (`../gestion-stock-gui`). Elle en conserve toutefois les données dans le fichier.
 
 ## Installation
 
@@ -40,7 +42,11 @@ STOCK_FICHIER=/chemin/vers/mon-stock.txt stock lister
 
 **Attention au dossier.** Si le programme ne trouve pas le fichier, il part d'un stock vide et te prévient sur la sortie d'erreur : `Note : fichier de données introuvable (« … »). On part d'un stock vide.` Si tu vois ce message alors que tu as déjà du stock, tu n'es pas dans le bon dossier : n'enregistre rien, sinon tu crées un deuxième fichier. Le plus sûr est de toujours indiquer le chemin complet avec `STOCK_FICHIER`. À la toute première utilisation, le programme annonce aussi la création du fichier : `Nouveau fichier de données créé : « … »`.
 
-Le fichier est du texte lisible. Si tu as fait une faute de frappe dans un nom de produit, tu peux l'ouvrir et la corriger à la main (une ligne `P;nom;quantité;seuil` par produit).
+Le fichier est du texte lisible. Si tu as fait une faute de frappe dans un nom de produit, tu peux l'ouvrir et la corriger à la main (une ligne `P;nom;quantité;seuil;prix;taux` par produit ; les deux derniers champs sont vides si le produit n'a pas de prix). **Ne touche pas aux lignes `S;` et `L;`** : c'est le journal des ventes, protégé par des empreintes ; l'interface graphique détecterait la modification et bloquerait les ventes.
+
+## Changement de format du fichier (version 2)
+
+Dès qu'une commande enregistre le fichier (même une simple entrée), il est réécrit au **format version 2** : il contient en plus les prix, les réglages et le journal des ventes de l'interface graphique. Les fichiers de l'ancien format se lisent sans perte, mais **l'ancienne version du programme ne sait pas relire le format version 2** : **garde une copie de `stock.txt` avant de passer à la nouvelle version.**
 
 ## Sauvegarde conseillée
 

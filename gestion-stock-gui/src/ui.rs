@@ -3054,4 +3054,62 @@ mod tests {
         let grises = [BOUTON_RENOMMER, BOUTON_ENTREE, BOUTON_SORTIE];
         verifier_contrastes(&sauf(textes, &grises), "stock avec prix");
     }
+
+    #[test]
+    fn dans_une_fenetre_basse_le_panier_defile_d_un_bloc_et_encaisser_reste_atteignable() {
+        // La hauteur minimale : le paiement ne peut plus rester épinglé sous les lignes.
+        let taille = Vec2::new(TAILLE_FENETRE[0], TAILLE_MINIMALE[1]);
+        let mut app = app_vendeuse("fenetre-basse");
+        app.panier = vec![
+            ("Pain".to_string(), 2),
+            ("Savon".to_string(), 1),
+            ("Lait".to_string(), 3),
+        ];
+        app.moyen = Moyen::Carte;
+        let mut h = harness_vente(app, taille);
+        let ecran = Rect::from_min_size(Pos2::ZERO, taille);
+        let rect_encaisser = |h: &Harness<'static, Application>| {
+            h.get_by_role_and_label(Role::Button, BOUTON_ENCAISSER)
+                .rect()
+        };
+        // Hors de l'écran au départ : sinon ce test ne prouverait rien.
+        assert!(
+            !ecran.contains_rect(rect_encaisser(&h)),
+            "{:?}",
+            rect_encaisser(&h)
+        );
+        h.get_by_role_and_label(Role::Button, BOUTON_ENCAISSER)
+            .scroll_to_me();
+        h.run();
+        assert!(
+            ecran.contains_rect(rect_encaisser(&h)),
+            "{:?}",
+            rect_encaisser(&h)
+        );
+        cliquer(&mut h, BOUTON_ENCAISSER);
+        assert_eq!(nombre_de_pieces(&h), 1);
+    }
+
+    #[test]
+    fn on_met_un_produit_au_panier_puis_on_encaisse_sans_la_souris() {
+        let mut h = harness_vente(app_vendeuse("clavier"), FENETRE);
+        let tuile_pain = tuile("Pain", "1,20\u{a0}€");
+        h.get_by_role_and_label(Role::Button, &tuile_pain).focus();
+        h.run();
+        h.key_press(eframe::egui::Key::Space);
+        h.run();
+        assert_eq!(h.state().panier, [("Pain".to_string(), 1)]);
+        // Par carte : Encaisser est actif sans montant ; on l'atteint puis on l'active au clavier.
+        h.get_by_role_and_label(Role::Button, MOYEN_CARTE).focus();
+        h.run();
+        h.key_press(eframe::egui::Key::Space);
+        h.run();
+        assert_eq!(h.state().moyen, Moyen::Carte);
+        h.get_by_role_and_label(Role::Button, BOUTON_ENCAISSER)
+            .focus();
+        h.run();
+        h.key_press(eframe::egui::Key::Enter);
+        h.run();
+        assert_eq!(nombre_de_pieces(&h), 1);
+    }
 }

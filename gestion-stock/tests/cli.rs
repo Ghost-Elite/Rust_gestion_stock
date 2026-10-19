@@ -1,5 +1,10 @@
 //! Tests de bout en bout : on lance le vrai programme `stock`, comme le ferait le commerçant.
 
+use gestion_stock::horodatage::Horodatage;
+use gestion_stock::monnaie::Montant;
+use gestion_stock::stock::Stock;
+use gestion_stock::stockage::{charger, sauvegarder};
+use gestion_stock::vente::Moyen;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
@@ -142,5 +147,45 @@ fn creation_du_fichier_est_annoncee_une_seule_fois() {
     );
     let o2 = lancer(&f, &["lister"]);
     assert_eq!(erreur(&o2), "");
+    let _ = std::fs::remove_file(&f);
+}
+
+/// Le README promet que la ligne de commande, qui ne vend pas, ne casse pas le journal des
+/// ventes faites dans la fenêtre : on le vérifie avec le vrai programme.
+#[test]
+fn la_ligne_de_commande_conserve_le_journal_des_ventes() {
+    let f = fichier("journal-conserve");
+    let mut stock = Stock::nouveau();
+    stock.ajouter_produit("Pain", 0).unwrap();
+    stock.enregistrer_entree("Pain", 10).unwrap();
+    stock
+        .definir_prix("Pain", Some(Montant(120)), Some(550))
+        .unwrap();
+    let quand = Horodatage {
+        utc: 1_700_000_000,
+        decalage_minutes: 60,
+    };
+    stock
+        .encaisser(
+            &[("Pain".to_string(), 3)],
+            Moyen::Carte,
+            Montant::ZERO,
+            quand,
+        )
+        .unwrap();
+    sauvegarder(&stock, &f).unwrap();
+
+    let o = lancer(&f, &["entree", "Pain", "5"]);
+    assert!(o.status.success(), "{}", erreur(&o));
+    let o = lancer(&f, &["sortie", "Pain", "1"]);
+    assert!(o.status.success(), "{}", erreur(&o));
+
+    let relu = charger(&f).unwrap();
+    assert_eq!(relu.pieces(), stock.pieces());
+    assert_eq!(relu.verifier_journal(), Ok(()));
+    assert_eq!(relu.reglages(), stock.reglages());
+    let pain = relu.produits()[0];
+    // 10 en stock, 3 vendus, 5 entrés, 1 sorti : 11.
+    assert_eq!((pain.quantite, pain.prix), (11, Some(Montant(120))));
     let _ = std::fs::remove_file(&f);
 }
