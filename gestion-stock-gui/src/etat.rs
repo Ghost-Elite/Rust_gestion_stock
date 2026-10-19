@@ -12,7 +12,7 @@ use gestion_stock::monnaie::{Devise, Montant, lire_taux};
 use gestion_stock::reglages::{Profil, Reglages};
 use gestion_stock::stock::{Genre, Stock};
 use gestion_stock::stockage::{charger, sauvegarder};
-use gestion_stock::vente::{Devis, GenrePiece, Moyen, Piece};
+use gestion_stock::vente::{Devis, GenrePiece, GroupeTaux, Moyen, Piece, detail_taxes};
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
@@ -31,6 +31,19 @@ pub struct LigneProduit {
     pub en_alerte: bool,
     /// `None` : le produit n'a pas de prix, on ne peut pas le vendre.
     pub prix: Option<Montant>,
+}
+
+/// Où en est un règlement en espèces, pour l'afficher pendant la saisie.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Reglement {
+    /// Rien n'est encore saisi (ou il n'y a rien à payer) : on n'affiche rien.
+    Attente,
+    /// Ce qui est saisi n'est pas un montant.
+    Illisible,
+    /// Le client n'a pas donné assez : il manque cette somme.
+    Manque(Montant),
+    /// Le compte est bon (0) ou il y a cette monnaie à rendre.
+    Rendu(Montant),
 }
 
 /// Une ligne de la liste des ventes, déjà écrite pour l'affichage.
@@ -498,6 +511,28 @@ impl Etat {
     pub fn derniere_piece(&self) -> Option<&Piece> {
         let numero = self.ticket?;
         self.stock.pieces().iter().find(|p| p.numero == numero)
+    }
+
+    /// Le détail par taux d'une pièce, pour son ticket. Calculé depuis les lignes de la pièce
+    /// (qui gardent leur prix et leur taux du moment), donc indépendant des prix d'aujourd'hui.
+    pub fn detail_taxes(&self, piece: &Piece) -> Vec<GroupeTaux> {
+        detail_taxes(&piece.lignes, self.stock.reglages().profil)
+            .map(|(groupes, _)| groupes)
+            .unwrap_or_default()
+    }
+
+    /// Ce que vaut le montant tapé pour payer `total` en espèces. Ne change rien : c'est
+    /// `encaisser` qui décide, ceci sert seulement à renseigner la personne en direct.
+    pub fn reglement_especes(&self, total: Montant, recu: &str) -> Reglement {
+        if total <= Montant::ZERO || recu.trim().is_empty() {
+            return Reglement::Attente;
+        }
+        match self.stock.reglages().devise.lire(recu) {
+            Ok(recu) if recu < Montant::ZERO => Reglement::Illisible,
+            Ok(recu) if recu < total => Reglement::Manque(Montant(total.0 - recu.0)),
+            Ok(recu) => Reglement::Rendu(Montant(recu.0 - total.0)),
+            Err(_) => Reglement::Illisible,
+        }
     }
 
     /// Ferme le ticket affiché : la personne prépare la vente suivante.
@@ -1156,6 +1191,48 @@ mod tests {
         assert!(e.encaisser(&panier(&[("Pain", 1)]), Moyen::Carte, ""));
         assert!(e.derniere_piece().is_some());
         e.effacer_ticket();
+        assert!(e.derniere_piece().is_none());
+    }
+
+    #[test]
+    fn le_detail_des_taxes_du_ticket_vient_des_lignes_de_la_piece() {
+        let mut e = etat_vendeur("detail-taxes");
+        assert!(e.encaisser(&panier(&[("Pain", 3), ("Savon", 1)]), Moyen::Carte, ""));
+        let piece = e.derniere_piece().unwrap().clone();
+        let taxes = |e: &Etat| -> Vec<(u32, i64)> {
+            e.detail_taxes(&piece)
+                .iter()
+                .map(|g| (g.taux_bp, g.taxe.0))
+                .collect()
+        };
+        assert_eq!(taxes(&e), [(550, 19), (2000, 42)]);
+        // Un changement de prix après coup ne change pas le détail de l'ancien ticket.
+        assert!(e.definir_prix("Pain", "9", "5,5"));
+        assert_eq!(taxes(&e), [(550, 19), (2000, 42)]);
+    }
+
+    #[test]
+    fn le_reglement_en_especes_se_calcule_en_direct_sans_rien_enregistrer() {
+        let e = etat_vendeur("reglement");
+        let total = Montant(360);
+        assert_eq!(e.reglement_especes(total, ""), Reglement::Attente);
+        assert_eq!(e.reglement_especes(total, "   "), Reglement::Attente);
+        assert_eq!(e.reglement_especes(total, "abc"), Reglement::Illisible);
+        assert_eq!(e.reglement_especes(total, "-5"), Reglement::Illisible);
+        assert_eq!(
+            e.reglement_especes(total, "3,10"),
+            Reglement::Manque(Montant(50))
+        );
+        assert_eq!(
+            e.reglement_especes(total, "3.60"),
+            Reglement::Rendu(Montant(0))
+        );
+        assert_eq!(
+            e.reglement_especes(total, "5"),
+            Reglement::Rendu(Montant(140))
+        );
+        // Un panier vide n'a rien à encaisser.
+        assert_eq!(e.reglement_especes(Montant(0), "5"), Reglement::Attente);
         assert!(e.derniere_piece().is_none());
     }
 }

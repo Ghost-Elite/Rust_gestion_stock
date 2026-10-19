@@ -8,25 +8,52 @@
 //! couleur d'accent, des puces pour les états, de l'espace. Les couleurs viennent toutes de
 //! `palette`, où leur contraste est vérifié par des tests.
 
-use crate::etat::{Etat, LigneProduit, Resume, Retour, chemin_complet};
+use crate::etat::{Etat, LigneProduit, Reglement, Resume, Retour, chemin_complet};
 use crate::palette::{
-    ACCENT, ACCENT_DOUX, ACCENT_TEXTE, ALERTE_FOND, ALERTE_TEXTE, DANGER, FILET, FOND,
+    ACCENT, ACCENT_DOUX, ACCENT_TEXTE, ALERTE_FOND, ALERTE_TEXTE, DANGER, FILET, FOCUS, FOND,
     SORTIE_TEXTE, SUCCES_FOND, SUCCES_TEXTE, SURFACE, TEXTE, TEXTE_DISCRET, couleur, ombre,
 };
 use crate::police::famille_disponible;
 use crate::textes::*;
 use eframe::egui::{
-    self, Align, Button, CentralPanel, CornerRadius, FontId, Frame, Id, Layout, Margin, Panel,
-    Response, RichText, ScrollArea, Sense, Stroke, TextEdit, Ui, Vec2,
+    self, Align, Button, CentralPanel, CornerRadius, CursorIcon, FontId, Frame, Id, Layout, Margin,
+    Panel, Response, RichText, ScrollArea, Sense, Stroke, StrokeKind, TextEdit, Ui, Vec2,
+    WidgetInfo, WidgetType,
 };
+use gestion_stock::erreur::ErreurStock;
+use gestion_stock::monnaie::Montant;
+use gestion_stock::reglages::Profil;
+use gestion_stock::vente::Moyen;
+use gestion_stock::vente::{Devis, GenrePiece, GroupeTaux};
 use std::path::Path;
+
+/// La taille de la fenêtre au lancement et sa taille minimale, en points. Les tests les utilisent
+/// aussi : ils vérifient que l'essentiel est à l'écran à la taille que voit vraiment la personne.
+pub const TAILLE_FENETRE: [f32; 2] = [1100.0, 720.0];
+pub const TAILLE_MINIMALE: [f32; 2] = [640.0, 420.0];
 
 /// En dessous de cette largeur (en points, donc aussi quand le texte est agrandi), on passe
 /// en une seule colonne : les commandes se placent sous la liste au lieu d'être à côté.
 const LARGEUR_DEUX_COLONNES: f32 = 800.0;
 
+/// Les sections de l'application. Les onglets Ventes et Réglages arrivent avec la Task 9.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Onglet {
+    /// L'écran de caisse : c'est celui que l'on ouvre en premier, la vente est le geste courant.
+    #[default]
+    Vente,
+    Stock,
+}
+
 #[derive(Default)]
 pub struct Application {
+    pub onglet: Onglet,
+    /// Le panier en cours : (nom du produit, quantité).
+    pub panier: Vec<(String, u32)>,
+    pub moyen: Moyen,
+    /// Ce que le client a donné, tel que tapé (pour un paiement en espèces).
+    pub saisie_recu: String,
+    pub recherche_vente: String,
     /// `None` : le fichier de données n'a pas pu être ouvert, on affiche l'écran d'erreur.
     pub etat: Option<Etat>,
     pub erreur_ouverture: Option<String>,
@@ -49,6 +76,22 @@ impl Application {
             etat: Some(etat),
             ..Application::default()
         }
+    }
+
+    /// Une unité de plus de ce produit dans le panier.
+    fn ajouter_au_panier(&mut self, nom: &str) {
+        match self.panier.iter_mut().find(|(n, _)| n == nom) {
+            Some((_, quantite)) => *quantite += 1,
+            None => self.panier.push((nom.to_string(), 1)),
+        }
+    }
+
+    /// Une unité de moins ; la ligne disparaît quand il n'en reste plus.
+    fn retirer_du_panier_une_unite(&mut self, nom: &str) {
+        if let Some((_, quantite)) = self.panier.iter_mut().find(|(n, _)| n == nom) {
+            *quantite = quantite.saturating_sub(1);
+        }
+        self.panier.retain(|(_, quantite)| *quantite > 0);
     }
 
     pub fn en_erreur(message: String, chemin: &Path) -> Application {
@@ -78,9 +121,9 @@ pub fn dessiner(ui: &mut Ui, app: &mut Application) {
         .frame(
             Frame::new()
                 .fill(couleur(SURFACE))
-                .inner_margin(Margin::symmetric(24, 16)),
+                .inner_margin(Margin::symmetric(24, 12)),
         )
-        .show(ui, entete);
+        .show(ui, |ui| entete(ui, app));
     Panel::bottom(Id::new("pied_de_page"))
         .frame(
             Frame::new()
@@ -88,6 +131,13 @@ pub fn dessiner(ui: &mut Ui, app: &mut Application) {
                 .inner_margin(Margin::symmetric(24, 10)),
         )
         .show(ui, |ui| pied_de_page(ui, app));
+    match app.onglet {
+        Onglet::Vente => ecran_vente(ui, app),
+        Onglet::Stock => ecran_stock(ui, app),
+    }
+}
+
+fn ecran_stock(ui: &mut Ui, app: &mut Application) {
     if ui.available_width() >= LARGEUR_DEUX_COLONNES {
         Panel::right(Id::new("commandes"))
             .frame(Frame::new().fill(couleur(FOND)).inner_margin(Margin {
@@ -149,17 +199,25 @@ fn abandonner_la_selection_perimee(app: &mut Application) {
 
 /// Une carte blanche aux coins arrondis, avec une ombre légère.
 fn carte<R>(ui: &mut Ui, contenu: impl FnOnce(&mut Ui) -> R) -> R {
+    carte_marge(ui, 18, contenu).inner
+}
+
+/// La même carte avec une marge au choix : le paiement, qui doit tenir à l'écran, en prend moins.
+fn carte_marge<R>(
+    ui: &mut Ui,
+    marge: i8,
+    contenu: impl FnOnce(&mut Ui) -> R,
+) -> egui::InnerResponse<R> {
     Frame::new()
         .fill(couleur(SURFACE))
         .stroke(Stroke::new(1.0, couleur(FILET)))
         .corner_radius(CornerRadius::same(14))
-        .inner_margin(Margin::same(18))
+        .inner_margin(Margin::same(marge))
         .shadow(ombre())
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             contenu(ui)
         })
-        .inner
 }
 
 /// Le titre d'une carte : un vrai titre pour les lecteurs d'écran, plus petit que celui de la page.
@@ -217,6 +275,35 @@ fn champ(ui: &mut Ui, libelle: &str, valeur: &mut String) -> Response {
     .labelled_by(etiquette.id)
 }
 
+/// Un champ de saisie sur la même ligne que son libellé, pour gagner de la hauteur. On peut
+/// y ajouter quelque chose à droite : `reserve` est la largeur à lui laisser.
+fn champ_en_ligne(
+    ui: &mut Ui,
+    libelle: &str,
+    valeur: &mut String,
+    reserve: f32,
+    a_droite: impl FnOnce(&mut Ui),
+) -> Response {
+    ui.horizontal(|ui| {
+        let etiquette = ui.label(
+            RichText::new(libelle)
+                .size(13.5)
+                .color(couleur(TEXTE_DISCRET)),
+        );
+        let largeur = (ui.available_width() - reserve - ui.spacing().item_spacing.x).max(60.0);
+        let champ = ui
+            .add(
+                TextEdit::singleline(valeur)
+                    .desired_width(largeur)
+                    .margin(Margin::symmetric(10, 8)),
+            )
+            .labelled_by(etiquette.id);
+        a_droite(ui);
+        champ
+    })
+    .inner
+}
+
 #[derive(Clone, Copy)]
 enum Style {
     /// Le bouton à mettre en avant : fond d'accent, texte blanc.
@@ -259,14 +346,58 @@ fn rempli(texte: &str) -> bool {
 
 // ---- Les zones de la fenêtre ------------------------------------------------------------------
 
-fn entete(ui: &mut Ui) {
+/// La largeur d'un onglet : la même pour tous, pour les aligner à droite sans surprise.
+const LARGEUR_ONGLET: f32 = 104.0;
+
+fn entete(ui: &mut Ui, app: &mut Application) {
+    let large = ui.available_width() >= LARGEUR_DEUX_COLONNES;
     ui.horizontal(|ui| {
         logo(ui);
         ui.vertical(|ui| {
             ui.heading(TITRE_FENETRE);
             discret(ui, SOUS_TITRE);
         });
+        if large {
+            // Les onglets à droite, sur la ligne du titre : de la hauteur gagnée pour la caisse.
+            let place = ONGLETS.len() as f32 * (LARGEUR_ONGLET + ui.spacing().item_spacing.x);
+            ui.add_space((ui.available_width() - place).max(0.0));
+            onglets(ui, app);
+        }
     });
+    if !large {
+        ui.add_space(6.0);
+        ui.horizontal_wrapped(|ui| onglets(ui, app));
+    }
+}
+
+const ONGLETS: [(Onglet, &str); 2] = [(Onglet::Vente, ONGLET_VENTE), (Onglet::Stock, ONGLET_STOCK)];
+
+/// Les sections de l'application. Chaque onglet est un bouton dont l'état « sélectionné » est
+/// annoncé par les lecteurs d'écran ; la couleur n'est qu'un renfort.
+fn onglets(ui: &mut Ui, app: &mut Application) {
+    for (onglet, texte) in ONGLETS {
+        if bouton_choix(ui, texte, app.onglet == onglet, LARGEUR_ONGLET).clicked() {
+            app.onglet = onglet;
+        }
+    }
+}
+
+/// Un bouton « à bascule » : celui qui est choisi est plein et en accent, les autres sont
+/// des boutons ordinaires.
+fn bouton_choix(ui: &mut Ui, texte: &str, choisi: bool, largeur: f32) -> Response {
+    let bouton = if choisi {
+        Button::new(gras(ui, texte, 15.5).color(couleur(ACCENT_TEXTE)))
+            .fill(couleur(ACCENT))
+            .stroke(Stroke::NONE)
+    } else {
+        Button::new(texte)
+    };
+    ui.add(
+        bouton
+            .selected(choisi)
+            .min_size(Vec2::new(largeur, 38.0))
+            .corner_radius(CornerRadius::same(10)),
+    )
 }
 
 /// Un texte en semi-gras : la graisse, plus que la taille, fait ressortir ce qui compte.
@@ -614,6 +745,593 @@ fn suppression(ui: &mut Ui, app: &mut Application, ligne: &LigneProduit) {
     }
 }
 
+// ---- L'écran de vente -------------------------------------------------------------------------
+
+const LARGEUR_TUILE: f32 = 158.0;
+const HAUTEUR_TUILE: f32 = 62.0;
+const LARGEUR_PANIER: f32 = 440.0;
+/// La place réservée aux boutons « − », quantité, « + » et « Retirer » d'une ligne de panier.
+const LARGEUR_COMMANDES_LIGNE: f32 = 208.0;
+
+/// Le devis du panier : `None` si le panier est vide.
+type DevisPanier = Option<Result<Devis, ErreurStock>>;
+
+fn nom_du_moyen(moyen: Moyen) -> &'static str {
+    match moyen {
+        Moyen::Especes => MOYEN_ESPECES,
+        Moyen::Carte => MOYEN_CARTE,
+        Moyen::Autre => MOYEN_AUTRE,
+    }
+}
+
+fn devis_du_panier(app: &Application) -> DevisPanier {
+    if app.panier.is_empty() {
+        return None;
+    }
+    app.etat.as_ref().map(|etat| etat.devis(&app.panier))
+}
+
+/// Vrai juste après une vente : le ticket prend la place du panier jusqu'à « Nouvelle vente ».
+fn ticket_affiche(app: &Application) -> bool {
+    app.etat
+        .as_ref()
+        .and_then(|etat| etat.derniere_piece())
+        .is_some_and(|piece| piece.genre == GenrePiece::Vente)
+}
+
+fn ecran_vente(ui: &mut Ui, app: &mut Application) {
+    let devis = devis_du_panier(app);
+    if ui.available_width() >= LARGEUR_DEUX_COLONNES {
+        Panel::right(Id::new("panier"))
+            .frame(Frame::new().fill(couleur(FOND)).inner_margin(Margin {
+                left: 4,
+                right: 24,
+                top: 16,
+                bottom: 16,
+            }))
+            .show_separator_line(false)
+            .default_size(LARGEUR_PANIER)
+            .min_size(330.0)
+            .show(ui, |ui| colonne_panier(ui, app, &devis));
+        CentralPanel::default()
+            .frame(Frame::new().fill(couleur(FOND)).inner_margin(Margin {
+                left: 24,
+                right: 4,
+                top: 16,
+                bottom: 16,
+            }))
+            .show(ui, |ui| {
+                ScrollArea::vertical()
+                    .auto_shrink(false)
+                    .show(ui, |ui| carte_produits(ui, app));
+            });
+    } else {
+        // Une seule colonne : le panier (ou le ticket) passe avant les produits dès qu'il y a
+        // quelque chose dedans, pour que « Encaisser » ne soit pas tout en bas d'une longue liste.
+        CentralPanel::default()
+            .frame(
+                Frame::new()
+                    .fill(couleur(FOND))
+                    .inner_margin(Margin::symmetric(16, 14)),
+            )
+            .show(ui, |ui| {
+                ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+                    if ticket_affiche(app) || !app.panier.is_empty() {
+                        panier_empile(ui, app, &devis);
+                        carte_produits(ui, app);
+                    } else {
+                        carte_produits(ui, app);
+                        panier_empile(ui, app, &devis);
+                    }
+                });
+            });
+    }
+}
+
+/// La hauteur de la carte de paiement, mesurée à l'image précédente (en mémoire d'egui).
+fn hauteur_du_paiement(ui: &Ui) -> f32 {
+    ui.data(|donnees| donnees.get_temp::<f32>(Id::new("hauteur_du_paiement")))
+        .unwrap_or(280.0)
+}
+
+/// Le bouton « Montant juste » se place à droite du champ si la carte est au moins aussi large.
+const LARGEUR_MONTANT_JUSTE_A_COTE: f32 = 360.0;
+const LARGEUR_BOUTON_JUSTE: f32 = 140.0;
+
+/// La place minimale gardée aux lignes du panier pour épingler le paiement dessous.
+const HAUTEUR_MIN_LIGNES: f32 = 130.0;
+
+/// La colonne de droite. Quand il y a assez de hauteur, les lignes du panier défilent et le
+/// paiement reste dessous, à l'écran, même avec un grand panier. Sinon (fenêtre basse), tout
+/// défile ensemble : rien n'est jamais rogné. On épingle en réservant la hauteur du paiement
+/// plutôt qu'en imbriquant un panneau egui : un panneau dans un panneau avale les clics.
+fn colonne_panier(ui: &mut Ui, app: &mut Application, devis: &DevisPanier) {
+    if ticket_affiche(app) {
+        ScrollArea::vertical().show(ui, |ui| carte(ui, |ui| ticket(ui, app)));
+        return;
+    }
+    let ecart = ui.spacing().item_spacing.y;
+    let reserve = hauteur_du_paiement(ui) + ecart;
+    let epingle = !app.panier.is_empty() && ui.available_height() >= reserve + HAUTEUR_MIN_LIGNES;
+    if !epingle {
+        ScrollArea::vertical().show(ui, |ui| panier_empile(ui, app, devis));
+        return;
+    }
+    carte(ui, |ui| carte_panier(ui, app, devis, Some(reserve)));
+    carte_paiement(ui, app, devis);
+}
+
+/// Le titre « Panier » avec « Vider le panier » à sa droite, puis les lignes. `reserve` : la
+/// hauteur à laisser libre sous la carte (le paiement épinglé) ; les lignes défilent dans le
+/// reste. `None` : les lignes prennent toute leur place, c'est la page qui défile.
+fn carte_panier(ui: &mut Ui, app: &mut Application, devis: &DevisPanier, reserve: Option<f32>) {
+    let mut vider = false;
+    ui.horizontal(|ui| {
+        titre_de_carte(ui, SECTION_PANIER);
+        if !app.panier.is_empty() {
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                vider = bouton(ui, BOUTON_VIDER, Style::Secondaire, true).clicked();
+            });
+        }
+    });
+    if vider {
+        app.panier.clear();
+    }
+    if app.panier.is_empty() {
+        discret(ui, PANIER_VIDE);
+        return;
+    }
+    match reserve {
+        Some(reserve) => {
+            // 18 : la marge basse de la carte, qui doit tenir elle aussi dans la hauteur.
+            let hauteur = (ui.available_height() - reserve - 18.0).max(60.0);
+            ScrollArea::vertical()
+                .auto_shrink([false, true])
+                .max_height(hauteur)
+                .show(ui, |ui| lignes_du_panier(ui, app, devis));
+        }
+        None => lignes_du_panier(ui, app, devis),
+    }
+}
+
+/// La carte de paiement, dont on mesure la hauteur pour la réserver à l'image suivante.
+fn carte_paiement(ui: &mut Ui, app: &mut Application, devis: &DevisPanier) {
+    let hauteur = carte_marge(ui, 14, |ui| paiement(ui, app, devis))
+        .response
+        .rect
+        .height();
+    if (hauteur - hauteur_du_paiement(ui)).abs() > 0.5 {
+        ui.data_mut(|donnees| donnees.insert_temp(Id::new("hauteur_du_paiement"), hauteur));
+        ui.ctx().request_repaint(); // la mise en page se corrige à l'image suivante
+    }
+}
+
+fn panier_empile(ui: &mut Ui, app: &mut Application, devis: &DevisPanier) {
+    if ticket_affiche(app) {
+        carte(ui, |ui| ticket(ui, app));
+        return;
+    }
+    carte(ui, |ui| carte_panier(ui, app, devis, None));
+    if !app.panier.is_empty() {
+        carte_paiement(ui, app, devis);
+    }
+}
+
+// ---- Les produits à vendre ----------------------------------------------------------------------
+
+fn carte_produits(ui: &mut Ui, app: &mut Application) {
+    carte(ui, |ui| {
+        titre_de_carte(ui, SECTION_PRODUITS_VENTE);
+        champ(ui, RECHERCHE_VENTE, &mut app.recherche_vente);
+        ui.add_space(6.0);
+        tuiles(ui, app);
+    });
+}
+
+/// Les produits en tuiles de même largeur, rangées selon la place disponible : un clic sur une
+/// tuile met une unité au panier.
+fn tuiles(ui: &mut Ui, app: &mut Application) {
+    let Some(etat) = &app.etat else { return };
+    let lignes = etat.lignes(&app.recherche_vente, false);
+    if lignes.is_empty() {
+        discret(ui, AUCUN_PRODUIT_VENDABLE);
+        return;
+    }
+    let ecart = ui.spacing().item_spacing.x;
+    let par_rangee = (((ui.available_width() + ecart) / (LARGEUR_TUILE + ecart)) as usize).max(1);
+    let mut choix: Option<String> = None;
+    for rangee in lignes.chunks(par_rangee) {
+        ui.horizontal_top(|ui| {
+            for ligne in rangee {
+                let au_panier = app
+                    .panier
+                    .iter()
+                    .find(|(nom, _)| *nom == ligne.nom)
+                    .map_or(0, |(_, quantite)| *quantite);
+                if tuile(ui, etat, ligne, au_panier) {
+                    choix = Some(ligne.nom.clone());
+                }
+            }
+        });
+    }
+    if let Some(nom) = choix {
+        // Choisir un produit commence une nouvelle vente : le ticket précédent se ferme.
+        if let Some(etat) = app.etat.as_mut() {
+            etat.effacer_ticket();
+        }
+        app.ajouter_au_panier(&nom);
+    }
+}
+
+/// Le dessin d'une tuile : un cadre arrondi, le nom du produit en semi-gras (à la ligne s'il est
+/// long) et son prix dessous, alignés à gauche. On la dessine nous-mêmes : un bouton egui
+/// centre mal un texte sur plusieurs lignes. Elle reste un vrai contrôle : focus clavier avec
+/// son contour, survol, état grisé.
+fn bouton_tuile(ui: &mut Ui, actif: bool, nom: &str, prix: &str) -> Response {
+    let marge = Vec2::new(12.0, 9.0);
+    let famille = famille_disponible(ui.ctx());
+    let couleur_texte = couleur(if actif { TEXTE } else { TEXTE_DISCRET });
+    let galerie_nom = ui.painter().layout(
+        nom.to_string(),
+        FontId::new(15.5, famille),
+        couleur_texte,
+        LARGEUR_TUILE - 2.0 * marge.x,
+    );
+    let galerie_prix = (!prix.is_empty()).then(|| {
+        ui.painter()
+            .layout_no_wrap(prix.to_string(), FontId::proportional(14.0), couleur_texte)
+    });
+    let hauteur_texte =
+        galerie_nom.size().y + galerie_prix.as_ref().map_or(0.0, |g| g.size().y + 2.0);
+    let taille = Vec2::new(
+        LARGEUR_TUILE,
+        (hauteur_texte + 2.0 * marge.y).max(HAUTEUR_TUILE),
+    );
+    let sense = if actif {
+        Sense::click()
+    } else {
+        Sense::hover()
+    };
+    let (rect, reponse) = ui.allocate_exact_size(taille, sense);
+    if ui.is_rect_visible(rect) {
+        let visuels = ui.style().interact(&reponse);
+        let (fond, contour) = if actif {
+            (visuels.weak_bg_fill, visuels.bg_stroke)
+        } else {
+            (couleur(FOND), Stroke::new(1.0, couleur(FILET)))
+        };
+        let peintre = ui.painter();
+        peintre.rect(
+            rect,
+            CornerRadius::same(12),
+            fond,
+            contour,
+            StrokeKind::Inside,
+        );
+        if reponse.has_focus() {
+            peintre.rect_stroke(
+                rect,
+                CornerRadius::same(12),
+                Stroke::new(2.0, couleur(FOCUS)),
+                StrokeKind::Inside,
+            );
+        }
+        let mut position = rect.min + marge;
+        let hauteur_nom = galerie_nom.size().y;
+        peintre.galley(position, galerie_nom, couleur_texte);
+        if let Some(galerie_prix) = galerie_prix {
+            position.y += hauteur_nom + 2.0;
+            peintre.galley(position, galerie_prix, couleur_texte);
+        }
+    }
+    if actif {
+        reponse.on_hover_cursor(CursorIcon::PointingHand)
+    } else {
+        reponse
+    }
+}
+
+/// Une tuile de produit. Quand on ne peut pas vendre, la tuile est grisée ET la raison est
+/// écrite dessous, hors du bouton : un bouton grisé est peu lisible, et la raison ne doit pas
+/// dépendre de la couleur. Renvoie vrai si on vient de cliquer dessus.
+fn tuile(ui: &mut Ui, etat: &Etat, ligne: &LigneProduit, au_panier: u32) -> bool {
+    let raison = if ligne.prix.is_none() {
+        Some(PRIX_MANQUANT)
+    } else if ligne.quantite == 0 {
+        Some(EPUISE)
+    } else if ligne.quantite <= au_panier {
+        Some(TOUT_AU_PANIER)
+    } else {
+        None
+    };
+    let prix = ligne.prix.map(|p| etat.formater(p)).unwrap_or_default();
+    let mut clic = false;
+    ui.vertical(|ui| {
+        ui.set_min_width(LARGEUR_TUILE);
+        ui.set_max_width(LARGEUR_TUILE);
+        ui.spacing_mut().item_spacing.y = 4.0;
+        let actif = raison.is_none();
+        let reponse = bouton_tuile(ui, actif, &ligne.nom, &prix);
+        // Le nom que l'on entend : l'action (ou la raison), le produit et le prix.
+        let nom_accessible = match raison {
+            None => ajouter_au_panier(&ligne.nom, &prix),
+            Some(raison) => produit_non_vendable(&ligne.nom, raison),
+        };
+        reponse
+            .widget_info(|| WidgetInfo::labeled(WidgetType::Button, actif, nom_accessible.clone()));
+        clic = reponse.clicked();
+        match raison {
+            Some(TOUT_AU_PANIER) => puce(ui, TOUT_AU_PANIER, ACCENT_DOUX, ACCENT),
+            Some(raison) => puce(ui, raison, ALERTE_FOND, ALERTE_TEXTE),
+            None if ligne.en_alerte => {
+                ui.label(
+                    RichText::new(stock_bas(ligne.quantite))
+                        .size(13.5)
+                        .color(couleur(ALERTE_TEXTE)),
+                );
+            }
+            None => discret(ui, &stock_restant(ligne.quantite)),
+        }
+    });
+    clic
+}
+
+// ---- Le panier -------------------------------------------------------------------------------------
+
+enum ActionPanier {
+    Plus(String),
+    Moins(String),
+    Retirer(String),
+}
+
+fn lignes_du_panier(ui: &mut Ui, app: &mut Application, devis: &DevisPanier) {
+    let Some(etat) = &app.etat else { return };
+    if let Some(Err(erreur)) = devis {
+        bandeau_alerte(ui, PANIER_INVALIDE);
+        discret(ui, &erreur.to_string());
+    }
+    let produits = etat.lignes("", false);
+    let mut action = None;
+    ui.spacing_mut().item_spacing.y = 4.0; // des lignes serrées : on veut en voir plusieurs
+    for (i, (nom, quantite)) in app.panier.iter().enumerate() {
+        if i > 0 {
+            ui.separator();
+        }
+        let stock = produits.iter().find(|p| &p.nom == nom).map(|p| p.quantite);
+        let detail = match devis {
+            Some(Ok(devis)) => devis.lignes.iter().find(|l| &l.nom == nom).and_then(|l| {
+                let total = l.prix.multiplier(*quantite).ok()?;
+                Some(ligne_de_panier(
+                    &etat.formater(l.prix),
+                    *quantite,
+                    &etat.formater(total),
+                ))
+            }),
+            _ => None,
+        };
+        if let Some(a) = ligne_du_panier(ui, nom, *quantite, stock, detail.as_deref()) {
+            action = Some(a);
+        }
+    }
+    match action {
+        Some(ActionPanier::Plus(nom)) => app.ajouter_au_panier(&nom),
+        Some(ActionPanier::Moins(nom)) => app.retirer_du_panier_une_unite(&nom),
+        Some(ActionPanier::Retirer(nom)) => app.panier.retain(|(n, _)| *n != nom),
+        None => {}
+    }
+}
+
+/// Un petit bouton carré (« − », « + »). Son texte n'est qu'un symbole : on lui donne un nom
+/// complet pour les lecteurs d'écran (« Retirer une unité de Pain »).
+fn bouton_symbole(ui: &mut Ui, symbole: &str, nom_accessible: &str, actif: bool) -> Response {
+    let reponse = ui.add_enabled(
+        actif,
+        Button::new(RichText::new(symbole).size(18.0))
+            .min_size(Vec2::splat(38.0))
+            .corner_radius(CornerRadius::same(10)),
+    );
+    reponse.widget_info(|| WidgetInfo::labeled(WidgetType::Button, actif, nom_accessible));
+    reponse
+}
+
+fn ligne_du_panier(
+    ui: &mut Ui,
+    nom: &str,
+    quantite: u32,
+    stock: Option<u32>,
+    detail: Option<&str>,
+) -> Option<ActionPanier> {
+    let mut action = None;
+    ui.horizontal(|ui| {
+        let largeur_nom =
+            (ui.available_width() - LARGEUR_COMMANDES_LIGNE - ui.spacing().item_spacing.x)
+                .max(90.0);
+        ui.allocate_ui_with_layout(
+            Vec2::new(largeur_nom, 0.0),
+            Layout::top_down(Align::Min),
+            |ui| {
+                ui.set_width(largeur_nom);
+                ui.label(gras(ui, nom, 16.0));
+                if let Some(detail) = detail {
+                    discret(ui, detail);
+                }
+            },
+        );
+        // De droite à gauche : « Retirer », « + », la quantité, « − ».
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            let retirer = bouton(ui, BOUTON_RETIRER, Style::Secondaire, true);
+            retirer.widget_info(|| {
+                WidgetInfo::labeled(WidgetType::Button, true, retirer_du_panier(nom))
+            });
+            if retirer.clicked() {
+                action = Some(ActionPanier::Retirer(nom.to_string()));
+            }
+            let place = stock.is_some_and(|stock| quantite < stock);
+            if bouton_symbole(ui, "+", &ajouter_une_unite(nom), place).clicked() {
+                action = Some(ActionPanier::Plus(nom.to_string()));
+            }
+            ui.label(gras(ui, &quantite.to_string(), 16.5));
+            if bouton_symbole(ui, "\u{2212}", &retirer_une_unite(nom), true).clicked() {
+                action = Some(ActionPanier::Moins(nom.to_string()));
+            }
+        });
+    });
+    action
+}
+
+/// Les lignes de totaux, avec « vrai » pour la ligne qui compte (le total à payer).
+/// Europe : les prix sont TTC, on montre le total puis la TVA qu'il contient. États-Unis : les
+/// prix sont hors taxe, on montre le sous-total, la taxe par taux, puis le total.
+fn lignes_totaux(etat: &Etat, groupes: &[GroupeTaux], total: Montant) -> Vec<(String, bool)> {
+    let reglages = etat.reglages();
+    let (devise, profil) = (reglages.devise, reglages.profil);
+    let ligne_total = (
+        format!("{} : {}", libelle_total(profil), devise.formater(total)),
+        true,
+    );
+    let taxes = groupes.iter().map(|groupe| {
+        let libelle = libelle_taxe(profil, &devise.formater_taux(groupe.taux_bp));
+        (
+            format!("{libelle} : {}", devise.formater(groupe.taxe)),
+            false,
+        )
+    });
+    match profil {
+        Profil::Europe => std::iter::once(ligne_total).chain(taxes).collect(),
+        Profil::EtatsUnis => {
+            let sous_total = Montant(groupes.iter().map(|g| g.base.0).sum());
+            let ligne_sous_total = (
+                format!("{LIBELLE_SOUS_TOTAL} : {}", devise.formater(sous_total)),
+                false,
+            );
+            std::iter::once(ligne_sous_total)
+                .chain(taxes)
+                .chain(std::iter::once(ligne_total))
+                .collect()
+        }
+    }
+}
+
+fn afficher_totaux(ui: &mut Ui, lignes: Vec<(String, bool)>) {
+    for (texte, fort) in lignes {
+        if fort {
+            ui.label(gras(ui, &texte, 19.0));
+        } else {
+            ui.label(texte);
+        }
+    }
+}
+
+// ---- Le paiement ------------------------------------------------------------------------------------
+
+fn paiement(ui: &mut Ui, app: &mut Application, devis: &DevisPanier) {
+    ui.spacing_mut().item_spacing.y = 5.0;
+    let Some(etat) = &app.etat else { return };
+    let valide = matches!(devis, Some(Ok(_)));
+    let total = match devis {
+        Some(Ok(devis)) => devis.total,
+        _ => Montant::ZERO,
+    };
+    if let Some(Ok(devis)) = devis {
+        afficher_totaux(ui, lignes_totaux(etat, &devis.groupes, devis.total));
+    }
+    ui.horizontal_wrapped(|ui| {
+        for moyen in [Moyen::Especes, Moyen::Carte, Moyen::Autre] {
+            if bouton_choix(ui, nom_du_moyen(moyen), app.moyen == moyen, 90.0).clicked() {
+                app.moyen = moyen;
+            }
+        }
+    });
+    let mut encaissable = valide;
+    if app.moyen == Moyen::Especes {
+        // « Montant juste » à droite du champ s'il y a la place, sinon dessous.
+        let a_cote = ui.available_width() >= LARGEUR_MONTANT_JUSTE_A_COTE;
+        let mut juste = false;
+        champ_en_ligne(
+            ui,
+            CHAMP_RECU,
+            &mut app.saisie_recu,
+            if a_cote { LARGEUR_BOUTON_JUSTE } else { 0.0 },
+            |ui| {
+                if a_cote {
+                    juste = bouton(ui, BOUTON_MONTANT_JUSTE, Style::Secondaire, valide).clicked();
+                }
+            },
+        );
+        if !a_cote {
+            juste = bouton(ui, BOUTON_MONTANT_JUSTE, Style::Secondaire, valide).clicked();
+        }
+        if juste {
+            app.saisie_recu = etat.reglages().devise.formater_brut(total);
+        }
+        let reglement = etat.reglement_especes(total, &app.saisie_recu);
+        match reglement {
+            Reglement::Rendu(rendu) => {
+                ui.label(gras(ui, &rendu_de_monnaie(&etat.formater(rendu)), 17.0));
+            }
+            Reglement::Manque(manque) => bandeau_alerte(ui, &il_manque(&etat.formater(manque))),
+            Reglement::Illisible => bandeau_alerte(ui, RECU_ILLISIBLE),
+            Reglement::Attente => {}
+        }
+        encaissable = valide && matches!(reglement, Reglement::Rendu(_));
+    }
+    let encaisser = ui
+        .with_layout(Layout::top_down_justified(Align::Center), |ui| {
+            bouton(ui, BOUTON_ENCAISSER, Style::Principal, encaissable)
+        })
+        .inner;
+    if encaisser.clicked()
+        && let Some(etat) = app.etat.as_mut()
+        && etat.encaisser(&app.panier, app.moyen, &app.saisie_recu)
+    {
+        app.panier.clear();
+        app.saisie_recu.clear();
+    }
+}
+
+// ---- Le ticket --------------------------------------------------------------------------------------
+
+/// Le ticket de la vente qui vient d'être faite. Il garde les prix et les taux du moment de la
+/// vente (ce sont ceux de la pièce du journal), pas ceux d'aujourd'hui.
+fn ticket(ui: &mut Ui, app: &mut Application) {
+    let Some(etat) = &app.etat else { return };
+    let Some(piece) = etat.derniere_piece() else {
+        return;
+    };
+    let devise = etat.reglages().devise;
+    titre_de_carte(ui, &titre_ticket(piece.numero));
+    discret(ui, &piece.horodatage.local().en_francais());
+    ui.add_space(4.0);
+    for ligne in &piece.lignes {
+        let total = ligne
+            .prix
+            .multiplier(ligne.quantite)
+            .map(|m| devise.formater(m))
+            .unwrap_or_default();
+        ui.label(ligne_de_ticket(ligne.quantite, &ligne.nom, &total));
+    }
+    ui.separator();
+    afficher_totaux(
+        ui,
+        lignes_totaux(etat, &etat.detail_taxes(piece), piece.total),
+    );
+    ui.label(moyen_du_ticket(nom_du_moyen(piece.moyen)));
+    if piece.moyen == Moyen::Especes {
+        ui.label(recu_du_ticket(&devise.formater(piece.recu)));
+        ui.label(gras(
+            ui,
+            &rendu_de_monnaie(&devise.formater(piece.rendu)),
+            17.0,
+        ));
+    }
+    ui.add_space(4.0);
+    discret(ui, MENTION_NON_CERTIFIE);
+    let nouvelle = bouton(ui, BOUTON_NOUVELLE_VENTE, Style::Principal, true).clicked();
+    if nouvelle && let Some(etat) = app.etat.as_mut() {
+        etat.effacer_ticket();
+    }
+}
+
 fn ecran_erreur_ouverture(ui: &mut Ui, app: &Application) {
     CentralPanel::default()
         .frame(
@@ -645,7 +1363,13 @@ mod tests {
     use crate::palette::{self, Rgb, rapport_contraste};
     use eframe::egui::accesskit::Role;
     use eframe::egui::{Color32, Context, Pos2, RawInput, Rect, Shape, Vec2};
-    use egui_kittest::{Harness, kittest::Queryable};
+    use egui_kittest::{
+        Harness,
+        kittest::{NodeT, Queryable},
+    };
+    use gestion_stock::horodatage::Horodatage;
+    use gestion_stock::monnaie::Devise;
+    use gestion_stock::reglages::Profil;
     use std::path::{Path, PathBuf};
 
     fn chemin_temp(nom: &str) -> PathBuf {
@@ -664,7 +1388,9 @@ mod tests {
         assert!(etat.entree("Riz 5kg", "3"));
         assert!(etat.ajouter("Sucre", "0"));
         assert!(etat.entree("Sucre", "10"));
-        Application::nouvelle(etat)
+        let mut app = Application::nouvelle(etat);
+        app.onglet = Onglet::Stock; // l'écran testé ici est celui du stock
+        app
     }
 
     /// Une grande fenêtre : avec les cartes et l'espace du design, une fenêtre de 800 x 600 ne
@@ -963,6 +1689,7 @@ mod tests {
             let mut etat = Etat::ouvrir(chemin_temp("visible")).unwrap();
             assert!(etat.ajouter(produit, "5")); // stock 0 <= seuil 5 : en alerte
             let mut app = Application::nouvelle(etat);
+            app.onglet = Onglet::Stock;
             let ecran = Rect::from_min_size(Pos2::ZERO, taille / zoom);
             let textes = textes_peints(&mut app, taille, zoom);
             let alerte = textes
@@ -1038,8 +1765,8 @@ mod tests {
 
     #[test]
     fn les_commandes_de_sortie_sont_visibles_sans_defiler_a_la_taille_par_defaut() {
-        // La taille de la fenêtre au lancement (voir `main.rs`) : c'est ce que voit la personne.
-        let taille = Vec2::new(960.0, 640.0);
+        // La taille de la fenêtre au lancement : c'est ce que voit la personne.
+        let taille = Vec2::new(TAILLE_FENETRE[0], TAILLE_FENETRE[1]);
         let mut h = Harness::builder().with_size(taille).build_ui_state(
             |ui, app: &mut Application| {
                 // Le VRAI style : sans lui (polices, espacements), tout tiendrait à l'écran
@@ -1058,6 +1785,520 @@ mod tests {
             assert!(
                 ecran.contains_rect(rect),
                 "« {nom} » est hors de l'écran : {rect:?} hors de {ecran:?}"
+            );
+        }
+    }
+
+    // ---- L'écran de vente ----------------------------------------------------------------------
+
+    const FIXE: Horodatage = Horodatage {
+        utc: 1_700_000_000,
+        decalage_minutes: 60,
+    };
+
+    /// Pain : 10 en stock à 1,20 € (TVA 5,5 %) ; Savon : 10 à 2,50 € et Lait : 10 à 0,90 € (TVA par
+    /// défaut, 20 %). L'horloge est fixe : 14/11/2023 à 23 h 13 heure locale.
+    fn etat_vendeur(nom: &str) -> Etat {
+        let mut e = Etat::ouvrir(chemin_temp(nom))
+            .unwrap()
+            .avec_horloge(|| FIXE);
+        assert!(e.ajouter_avec_prix("Pain", "0", "1,20", "5,5"));
+        assert!(e.entree("Pain", "10"));
+        assert!(e.ajouter_avec_prix("Savon", "0", "2,50", ""));
+        assert!(e.entree("Savon", "10"));
+        assert!(e.ajouter_avec_prix("Lait", "0", "0,90", ""));
+        assert!(e.entree("Lait", "10"));
+        e
+    }
+
+    /// La boutique d'exemple, sans produit bloqué : tous les boutons peuvent être actifs.
+    fn app_vendeuse(nom: &str) -> Application {
+        Application::nouvelle(etat_vendeur(nom))
+    }
+
+    /// La même, avec un produit épuisé (« Sel ») et un produit sans prix (« Thé »).
+    fn app_vendeuse_avec_blocages(nom: &str) -> Application {
+        let mut etat = etat_vendeur(nom);
+        assert!(etat.ajouter_avec_prix("Sel", "0", "0,80", "")); // stock 0 : épuisé
+        assert!(etat.ajouter("Thé", "0"));
+        assert!(etat.entree("Thé", "5")); // pas de prix
+        Application::nouvelle(etat)
+    }
+
+    /// Avec le VRAI style (polices, espacements) : ce que voit la personne.
+    fn harness_vente(app: Application, taille: Vec2) -> Harness<'static, Application> {
+        let mut h = Harness::builder().with_size(taille).build_ui_state(
+            |ui, app: &mut Application| {
+                palette::appliquer(ui.ctx());
+                dessiner(ui, app);
+            },
+            app,
+        );
+        h.run();
+        h
+    }
+
+    const FENETRE: Vec2 = Vec2::new(TAILLE_FENETRE[0], TAILLE_FENETRE[1]);
+
+    fn tuile(nom: &str, prix: &str) -> String {
+        ajouter_au_panier(nom, prix)
+    }
+
+    fn cliquer(h: &mut Harness<'static, Application>, libelle: &str) {
+        h.get_by_role_and_label(Role::Button, libelle).click();
+        h.run();
+    }
+
+    fn est_grise(h: &Harness<'static, Application>, libelle: &str) -> bool {
+        h.get_by_role_and_label(Role::Button, libelle)
+            .accesskit_node()
+            .is_disabled()
+    }
+
+    fn nombre_de_pieces(h: &Harness<'static, Application>) -> usize {
+        h.state().etat.as_ref().unwrap().pieces_recentes(100).len()
+    }
+
+    #[test]
+    fn l_application_s_ouvre_sur_la_vente() {
+        let app = app_vendeuse("ouverture");
+        assert_eq!(app.onglet, Onglet::Vente);
+    }
+
+    #[test]
+    fn les_onglets_sont_annonces_avec_leur_nom_et_leur_role() {
+        let mut h = harness_vente(app_vendeuse("onglets"), FENETRE);
+        let selectionne = |h: &Harness<'static, Application>, nom: &str| {
+            h.get_by_role_and_label(Role::Button, nom)
+                .accesskit_node()
+                .toggled()
+        };
+        // Le choix est dit par l'état « sélectionné » et pas seulement par la couleur.
+        assert_eq!(
+            selectionne(&h, ONGLET_VENTE),
+            Some(eframe::egui::accesskit::Toggled::True)
+        );
+        assert_eq!(
+            selectionne(&h, ONGLET_STOCK),
+            Some(eframe::egui::accesskit::Toggled::False)
+        );
+        cliquer(&mut h, ONGLET_STOCK);
+        assert_eq!(h.state().onglet, Onglet::Stock);
+        h.get_by_role_and_label(Role::TextInput, RECHERCHE);
+        assert!(h.query_by_label(SECTION_PANIER).is_none());
+        cliquer(&mut h, ONGLET_VENTE);
+        assert_eq!(h.state().onglet, Onglet::Vente);
+        h.get_by_label(SECTION_PANIER);
+    }
+
+    #[test]
+    fn cliquer_une_tuile_remplit_le_panier_et_les_totaux() {
+        let mut h = harness_vente(app_vendeuse("tuile"), FENETRE);
+        h.get_by_label(PANIER_VIDE);
+        let pain = tuile("Pain", "1,20\u{a0}€");
+        cliquer(&mut h, &pain);
+        cliquer(&mut h, &pain);
+        assert_eq!(h.state().panier, [("Pain".to_string(), 2)]);
+        h.get_by_label("Pain");
+        h.get_by_label(&ligne_de_panier("1,20\u{a0}€", 2, "2,40\u{a0}€"));
+        h.get_by_label("Total TTC : 2,40\u{a0}€");
+        assert!(h.query_by_label(PANIER_VIDE).is_none());
+        // Rien n'est vendu tant qu'on n'a pas encaissé.
+        assert_eq!(nombre_de_pieces(&h), 0);
+    }
+
+    #[test]
+    fn un_produit_epuise_ou_sans_prix_ne_s_ajoute_pas() {
+        let mut h = harness_vente(app_vendeuse_avec_blocages("bloques"), FENETRE);
+        h.get_by_label(EPUISE);
+        h.get_by_label(PRIX_MANQUANT);
+        for (nom, raison) in [("Sel", EPUISE), ("Thé", PRIX_MANQUANT)] {
+            let libelle = produit_non_vendable(nom, raison);
+            assert!(est_grise(&h, &libelle), "{libelle} devrait être grisée");
+            h.get_by_role_and_label(Role::Button, &libelle).click();
+            h.run();
+        }
+        assert!(h.state().panier.is_empty());
+        assert!(!est_grise(&h, &tuile("Pain", "1,20\u{a0}€")));
+    }
+
+    #[test]
+    fn on_ne_peut_pas_mettre_au_panier_plus_que_le_stock() {
+        let mut app = app_vendeuse("limite");
+        app.panier = vec![("Savon".to_string(), 10)]; // tout le stock
+        let mut h = harness_vente(app, FENETRE);
+        h.get_by_label(TOUT_AU_PANIER);
+        assert!(est_grise(
+            &h,
+            &produit_non_vendable("Savon", TOUT_AU_PANIER)
+        ));
+        assert!(est_grise(&h, &ajouter_une_unite("Savon")));
+        assert!(!est_grise(&h, &retirer_une_unite("Savon")));
+        cliquer(&mut h, &retirer_une_unite("Savon"));
+        assert_eq!(h.state().panier, [("Savon".to_string(), 9)]);
+        assert!(!est_grise(&h, &ajouter_une_unite("Savon")));
+    }
+
+    #[test]
+    fn les_boutons_du_panier_ont_un_nom_complet_et_agissent() {
+        let mut h = harness_vente(app_vendeuse("boutons-panier"), FENETRE);
+        cliquer(&mut h, &tuile("Pain", "1,20\u{a0}€"));
+        cliquer(&mut h, &tuile("Savon", "2,50\u{a0}€"));
+        cliquer(&mut h, &ajouter_une_unite("Pain"));
+        assert_eq!(
+            h.state().panier,
+            [("Pain".to_string(), 2), ("Savon".to_string(), 1)]
+        );
+        cliquer(&mut h, &retirer_une_unite("Pain"));
+        cliquer(&mut h, &retirer_une_unite("Pain")); // la ligne tombe à 0 : elle disparaît
+        assert_eq!(h.state().panier, [("Savon".to_string(), 1)]);
+        cliquer(&mut h, &retirer_du_panier("Savon"));
+        assert!(h.state().panier.is_empty());
+        cliquer(&mut h, &tuile("Pain", "1,20\u{a0}€"));
+        cliquer(&mut h, BOUTON_VIDER);
+        assert!(h.state().panier.is_empty());
+        h.get_by_label(PANIER_VIDE);
+    }
+
+    #[test]
+    fn la_recherche_filtre_les_tuiles() {
+        let mut h = harness_vente(app_vendeuse("recherche-vente"), FENETRE);
+        saisir(&mut h, RECHERCHE_VENTE, "sav");
+        h.get_by_role_and_label(Role::Button, &tuile("Savon", "2,50\u{a0}€"));
+        assert!(h.query_by_label_contains("Ajouter Pain").is_none());
+    }
+
+    #[test]
+    fn encaisser_en_especes_montre_le_rendu_puis_le_ticket() {
+        let mut h = harness_vente(app_vendeuse("especes"), Vec2::new(1100.0, 900.0));
+        let pain = tuile("Pain", "1,20\u{a0}€");
+        for _ in 0..3 {
+            cliquer(&mut h, &pain);
+        }
+        h.get_by_label("Total TTC : 3,60\u{a0}€");
+        saisir(&mut h, CHAMP_RECU, "5");
+        h.get_by_label(&rendu_de_monnaie("1,40\u{a0}€"));
+        cliquer(&mut h, BOUTON_ENCAISSER);
+
+        let etat = h.state().etat.as_ref().unwrap();
+        assert_eq!(etat.lignes("pain", false)[0].quantite, 7);
+        let pieces = etat.pieces_recentes(10);
+        assert_eq!(pieces.len(), 1);
+        assert_eq!(pieces[0].numero, 1);
+        assert!(h.state().panier.is_empty());
+        assert!(h.state().saisie_recu.is_empty());
+        h.get_by_label(&titre_ticket(1));
+        h.get_by_label_contains("14/11/2023 23:13");
+        h.get_by_label(&ligne_de_ticket(3, "Pain", "3,60\u{a0}€"));
+        h.get_by_label(&recu_du_ticket("5,00\u{a0}€"));
+        h.get_by_label(&rendu_de_monnaie("1,40\u{a0}€"));
+        h.get_by_label_contains("Vente n° 1 enregistrée");
+        // Le bouton a disparu avec le panier : on ne peut pas encaisser deux fois.
+        assert!(h.query_by_label(BOUTON_ENCAISSER).is_none());
+
+        cliquer(&mut h, BOUTON_NOUVELLE_VENTE);
+        assert!(h.query_by_label(&titre_ticket(1)).is_none());
+        h.get_by_label(PANIER_VIDE);
+        assert_eq!(nombre_de_pieces(&h), 1); // le ticket fermé ne supprime pas la vente
+    }
+
+    #[test]
+    fn le_bouton_encaisser_est_grise_si_le_recu_ne_couvre_pas_le_total() {
+        let mut h = harness_vente(app_vendeuse("recu-court"), Vec2::new(1100.0, 900.0));
+        let pain = tuile("Pain", "1,20\u{a0}€");
+        for _ in 0..3 {
+            cliquer(&mut h, &pain);
+        }
+        // Aucun montant : rien n'est dit, mais on ne peut pas encaisser.
+        assert!(est_grise(&h, BOUTON_ENCAISSER));
+        saisir(&mut h, CHAMP_RECU, "2");
+        h.get_by_label(&il_manque("1,60\u{a0}€"));
+        assert!(est_grise(&h, BOUTON_ENCAISSER));
+        h.get_by_role_and_label(Role::Button, BOUTON_ENCAISSER)
+            .click();
+        h.run();
+        assert_eq!(nombre_de_pieces(&h), 0);
+
+        saisir(&mut h, CHAMP_RECU, "x");
+        h.get_by_label_contains("Montant illisible");
+        assert!(est_grise(&h, BOUTON_ENCAISSER));
+    }
+
+    #[test]
+    fn un_double_clic_sur_encaisser_n_enregistre_qu_une_vente() {
+        let mut h = harness_vente(app_vendeuse("double-vente"), Vec2::new(1100.0, 900.0));
+        cliquer(&mut h, &tuile("Pain", "1,20\u{a0}€"));
+        saisir(&mut h, CHAMP_RECU, "2");
+        cliquer(&mut h, BOUTON_ENCAISSER);
+        // Le second clic tombe sur un bouton qui n'existe plus : rien ne se passe.
+        if let Some(bouton) = h.query_by_role_and_label(Role::Button, BOUTON_ENCAISSER) {
+            bouton.click();
+            h.run();
+        }
+        assert_eq!(nombre_de_pieces(&h), 1);
+        let etat = h.state().etat.as_ref().unwrap();
+        assert_eq!(etat.lignes("pain", false)[0].quantite, 9);
+    }
+
+    #[test]
+    fn par_carte_le_montant_recu_n_est_pas_demande() {
+        let mut h = harness_vente(app_vendeuse("carte"), Vec2::new(1100.0, 900.0));
+        cliquer(&mut h, &tuile("Savon", "2,50\u{a0}€"));
+        cliquer(&mut h, MOYEN_CARTE);
+        assert_eq!(h.state().moyen, Moyen::Carte);
+        assert!(h.query_by_label(CHAMP_RECU).is_none());
+        assert!(!est_grise(&h, BOUTON_ENCAISSER));
+        cliquer(&mut h, BOUTON_ENCAISSER);
+        assert_eq!(nombre_de_pieces(&h), 1);
+        h.get_by_label(&moyen_du_ticket("Carte"));
+    }
+
+    #[test]
+    fn montant_juste_remplit_le_recu_avec_le_total() {
+        let mut h = harness_vente(app_vendeuse("juste"), Vec2::new(1100.0, 900.0));
+        cliquer(&mut h, &tuile("Savon", "2,50\u{a0}€"));
+        cliquer(&mut h, BOUTON_MONTANT_JUSTE);
+        assert_eq!(h.state().saisie_recu, "2,50");
+        h.get_by_label(&rendu_de_monnaie("0,00\u{a0}€"));
+        assert!(!est_grise(&h, BOUTON_ENCAISSER));
+    }
+
+    #[test]
+    fn un_panier_devenu_invalide_est_signale_et_ne_s_encaisse_pas() {
+        let mut app = app_vendeuse("invalide");
+        app.panier = vec![("Fantôme".to_string(), 1)];
+        let h = harness_vente(app, Vec2::new(1100.0, 900.0));
+        h.get_by_label(PANIER_INVALIDE);
+        assert!(est_grise(&h, BOUTON_ENCAISSER));
+    }
+
+    #[test]
+    fn choisir_une_tuile_apres_une_vente_ferme_le_ticket_et_commence_la_suivante() {
+        let mut h = harness_vente(app_vendeuse("suivante"), Vec2::new(1100.0, 900.0));
+        cliquer(&mut h, &tuile("Savon", "2,50\u{a0}€"));
+        cliquer(&mut h, MOYEN_CARTE);
+        cliquer(&mut h, BOUTON_ENCAISSER);
+        h.get_by_label(&titre_ticket(1));
+        cliquer(&mut h, &tuile("Pain", "1,20\u{a0}€"));
+        assert!(h.query_by_label(&titre_ticket(1)).is_none());
+        assert_eq!(h.state().panier, [("Pain".to_string(), 1)]);
+    }
+
+    #[test]
+    fn le_ticket_detaille_la_tva_par_taux_en_europe() {
+        let mut h = harness_vente(app_vendeuse("tva"), Vec2::new(1100.0, 900.0));
+        for _ in 0..3 {
+            cliquer(&mut h, &tuile("Pain", "1,20\u{a0}€"));
+        }
+        cliquer(&mut h, &tuile("Savon", "2,50\u{a0}€"));
+        let lignes = [
+            "Total TTC : 6,10\u{a0}€",
+            "dont TVA 5,5\u{a0}% : 0,19\u{a0}€",
+            "dont TVA 20\u{a0}% : 0,42\u{a0}€",
+        ];
+        for l in lignes {
+            h.get_by_label(l);
+        }
+        cliquer(&mut h, MOYEN_CARTE);
+        cliquer(&mut h, BOUTON_ENCAISSER);
+        // Le ticket garde le détail, calculé depuis les lignes vendues.
+        for l in lignes {
+            h.get_by_label(l);
+        }
+    }
+
+    #[test]
+    fn le_ticket_detaille_la_taxe_aux_etats_unis() {
+        let mut etat = Etat::ouvrir(chemin_temp("taxe-us"))
+            .unwrap()
+            .avec_horloge(|| FIXE);
+        assert!(etat.definir_reglages(Profil::EtatsUnis, Devise::Usd, "8"));
+        assert!(etat.ajouter_avec_prix("Pain", "0", "1.20", ""));
+        assert!(etat.entree("Pain", "10"));
+        let mut h = harness_vente(Application::nouvelle(etat), Vec2::new(1100.0, 900.0));
+        cliquer(&mut h, &tuile("Pain", "$1.20"));
+        cliquer(&mut h, &tuile("Pain", "$1.20"));
+        // 2,40 $ hors taxe + 8 % (19,2 cents arrondis à 19) = 2,59 $.
+        let lignes = [
+            "Sous-total : $2.40",
+            "Taxe 8\u{a0}% : $0.19",
+            "Total : $2.59",
+        ];
+        for l in lignes {
+            h.get_by_label(l);
+        }
+        cliquer(&mut h, MOYEN_CARTE);
+        cliquer(&mut h, BOUTON_ENCAISSER);
+        for l in lignes {
+            h.get_by_label(l);
+        }
+    }
+
+    #[test]
+    fn le_ticket_affiche_la_mention_non_certifie() {
+        let mut h = harness_vente(app_vendeuse("mention"), Vec2::new(1100.0, 900.0));
+        cliquer(&mut h, &tuile("Savon", "2,50\u{a0}€"));
+        cliquer(&mut h, MOYEN_CARTE);
+        cliquer(&mut h, BOUTON_ENCAISSER);
+        h.get_by_label_contains("n'est pas une caisse certifiée");
+    }
+
+    #[test]
+    fn un_journal_altere_grise_encaisser_et_le_dit() {
+        let chemin = chemin_temp("journal-altere");
+        {
+            let mut e = etat_vendeur("journal-source");
+            assert!(e.encaisser(&[("Pain".to_string(), 1)], Moyen::Carte, ""));
+            std::fs::copy(e.chemin(), &chemin).unwrap();
+        }
+        let contenu = std::fs::read_to_string(&chemin).unwrap();
+        // Une modification à la main, dans le journal : le pain vendu passe de 1,20 à 0,10.
+        let altere = contenu.replacen("L;1;Pain;1;120;", "L;1;Pain;1;10;", 1);
+        assert_ne!(
+            contenu, altere,
+            "le fichier n'a pas le format attendu :\n{contenu}"
+        );
+        std::fs::write(&chemin, altere).unwrap();
+        let etat = Etat::ouvrir(chemin).unwrap().avec_horloge(|| FIXE);
+        let mut h = harness_vente(Application::nouvelle(etat), Vec2::new(1100.0, 900.0));
+        cliquer(&mut h, &tuile("Savon", "2,50\u{a0}€"));
+        cliquer(&mut h, MOYEN_CARTE);
+        cliquer(&mut h, BOUTON_ENCAISSER);
+        // Rien n'est vendu et le message de blocage est montré.
+        assert_eq!(nombre_de_pieces(&h), 1);
+        h.get_by_label_contains("les ventes sont bloquées");
+    }
+
+    #[test]
+    fn les_actions_principales_de_la_vente_sont_a_l_ecran_a_la_taille_par_defaut() {
+        let mut app = app_vendeuse("ecran-defaut");
+        // Trois lignes de panier : « Encaisser » doit rester visible malgré elles.
+        app.panier = vec![
+            ("Pain".to_string(), 2),
+            ("Savon".to_string(), 1),
+            ("Lait".to_string(), 3),
+        ];
+        let mut h = harness_vente(app, FENETRE);
+        let ecran = Rect::from_min_size(Pos2::ZERO, FENETRE);
+        for (role, nom) in [
+            (Role::Button, BOUTON_ENCAISSER.to_string()),
+            (Role::TextInput, CHAMP_RECU.to_string()),
+            (Role::Button, tuile("Pain", "1,20\u{a0}€")),
+        ] {
+            let rect = h.get_by_role_and_label(role, &nom).rect();
+            assert!(
+                ecran.contains_rect(rect),
+                "« {nom} » est hors de l'écran : {rect:?} hors de {ecran:?}"
+            );
+        }
+        saisir(&mut h, CHAMP_RECU, "10");
+        let rect = h.get_by_label_contains(LIBELLE_RENDU).rect();
+        assert!(
+            ecran.contains_rect(rect),
+            "le rendu est hors de l'écran : {rect:?}"
+        );
+    }
+
+    #[test]
+    fn dans_une_fenetre_etroite_le_panier_et_encaisser_restent_accessibles() {
+        let mut app = app_vendeuse("etroit");
+        app.panier = vec![("Pain".to_string(), 2)];
+        let h = harness_vente(app, Vec2::new(520.0, 1400.0));
+        let ecran = Rect::from_min_size(Pos2::ZERO, Vec2::new(520.0, 1400.0));
+        for nom in [BOUTON_ENCAISSER, MOYEN_CARTE] {
+            let rect = h.get_by_role_and_label(Role::Button, nom).rect();
+            assert!(ecran.contains_rect(rect), "« {nom} » : {rect:?}");
+        }
+        // Un panier non vide passe avant la liste des produits dans l'ordre de lecture.
+        let panier = h.get_by_label(SECTION_PANIER).rect();
+        let produits = h.get_by_label(SECTION_PRODUITS_VENTE).rect();
+        assert!(panier.top() < produits.top());
+    }
+
+    fn verifier_contrastes(textes: &[TextePeint], nom_du_cas: &str) {
+        assert!(
+            textes.len() > 15,
+            "{nom_du_cas} : trop peu de textes : {}",
+            textes.len()
+        );
+        for t in textes {
+            let rapport = rapport_contraste(t.couleur, t.fond);
+            assert!(
+                rapport >= 4.5,
+                "{nom_du_cas} : « {} » : {rapport:.2}:1 ({:?} sur {:?})",
+                t.texte,
+                t.couleur,
+                t.fond
+            );
+        }
+    }
+
+    #[test]
+    fn tous_les_textes_peints_de_l_ecran_vente_atteignent_4_5() {
+        // Panier rempli, espèces, reçu suffisant : tous les boutons sont actifs.
+        let mut app = app_vendeuse("contraste-vente");
+        app.panier = vec![("Pain".to_string(), 2), ("Savon".to_string(), 1)];
+        app.saisie_recu = "10".into();
+        let textes = textes_peints(&mut app, FENETRE, 1.0);
+        for attendu in [BOUTON_ENCAISSER, "Total TTC : 4,90\u{a0}€"] {
+            assert!(
+                textes.iter().any(|t| t.texte == attendu),
+                "« {attendu} » n'est pas peint"
+            );
+        }
+        verifier_contrastes(&textes, "panier");
+
+        // Un montant qui manque s'écrit sur fond d'alerte : même exigence.
+        app.saisie_recu = "1".into();
+        let textes = textes_peints(&mut app, FENETRE, 1.0);
+        assert!(textes.iter().any(|t| t.texte.starts_with("Il manque")));
+        // Le bouton « Encaisser » est grisé ici : un contrôle inactif est dispensé de contraste.
+        let actifs: Vec<TextePeint> = textes
+            .into_iter()
+            .filter(|t| t.texte != BOUTON_ENCAISSER)
+            .collect();
+        verifier_contrastes(&actifs, "reçu insuffisant");
+
+        // Le ticket, juste après l'encaissement.
+        app.saisie_recu = "10".into();
+        let etat = app.etat.as_mut().unwrap();
+        assert!(etat.encaisser(&app.panier, Moyen::Especes, "10"));
+        app.panier.clear();
+        let textes = textes_peints(&mut app, FENETRE, 1.0);
+        assert!(textes.iter().any(|t| t.texte == MENTION_NON_CERTIFIE));
+        verifier_contrastes(&textes, "ticket");
+    }
+
+    #[test]
+    fn les_tuiles_bloquees_gardent_une_legende_lisible() {
+        let mut app = app_vendeuse_avec_blocages("legende");
+        let textes = textes_peints(&mut app, FENETRE, 1.0);
+        for legende in [EPUISE, PRIX_MANQUANT] {
+            let t = textes
+                .iter()
+                .find(|t| t.texte == legende)
+                .unwrap_or_else(|| panic!("« {legende} » n'est pas peint"));
+            let rapport = rapport_contraste(t.couleur, t.fond);
+            // La légende est hors du bouton grisé : elle reste aussi lisible qu'un texte normal.
+            assert!(rapport >= 4.5, "« {legende} » : {rapport:.2}:1");
+        }
+    }
+
+    #[test]
+    fn l_alerte_de_stock_reste_visible_a_200_pour_cent_sur_l_ecran_vente() {
+        let taille = Vec2::new(960.0, 1400.0);
+        let mut app = app_vendeuse_avec_blocages("zoom-vente");
+        let ecran = Rect::from_min_size(Pos2::ZERO, taille / 2.0);
+        let textes = textes_peints(&mut app, taille, 2.0);
+        for legende in [EPUISE, PRIX_MANQUANT] {
+            let t = textes
+                .iter()
+                .find(|t| t.texte == legende)
+                .unwrap_or_else(|| panic!("« {legende} » n'est pas peint à 200 %"));
+            assert!(
+                ecran.contains_rect(t.rect),
+                "« {legende} » déborde de l'écran : {:?} hors de {ecran:?}",
+                t.rect
             );
         }
     }

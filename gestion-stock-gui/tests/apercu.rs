@@ -8,9 +8,11 @@
 
 use eframe::egui::Vec2;
 use egui_kittest::{Harness, SnapshotOptions};
+use gestion_stock::horodatage::Horodatage;
+use gestion_stock::vente::Moyen;
 use gestion_stock_gui::etat::Etat;
 use gestion_stock_gui::palette;
-use gestion_stock_gui::ui::{Application, dessiner};
+use gestion_stock_gui::ui::{Application, Onglet, dessiner};
 
 /// Une boutique d'exemple : des produits en alerte, d'autres corrects, un peu d'historique.
 fn application_exemple(nom: &str) -> Application {
@@ -19,7 +21,10 @@ fn application_exemple(nom: &str) -> Application {
         std::process::id()
     ));
     let _ = std::fs::remove_file(&chemin);
-    let mut etat = Etat::ouvrir(chemin).unwrap();
+    let mut etat = Etat::ouvrir(chemin).unwrap().avec_horloge(|| Horodatage {
+        utc: 1_700_000_000,
+        decalage_minutes: 60,
+    });
     for (produit, seuil, stock) in [
         ("Riz parfumé 5kg", "5", "8"),
         ("Sucre en poudre 1kg", "10", "42"),
@@ -36,7 +41,33 @@ fn application_exemple(nom: &str) -> Application {
     }
     assert!(etat.sortie("Riz parfumé 5kg", "5")); // il en reste 3, sous le seuil de 5
     assert!(etat.sortie("Café moulu 250g", "2"));
-    Application::nouvelle(etat)
+    // Des prix, sauf pour le savon (« Prix manquant ») ; le taux réduit pour les denrées.
+    for (produit, prix, taux) in [
+        ("Riz parfumé 5kg", "8,90", "5,5"),
+        ("Sucre en poudre 1kg", "1,45", "5,5"),
+        ("Huile d'arachide 1 L", "3,20", "5,5"),
+        ("Farine de blé 25kg", "21,00", "5,5"),
+        ("Café moulu 250g", "4,75", "5,5"),
+        ("Lait concentré", "1,10", "5,5"),
+    ] {
+        assert!(etat.definir_prix(produit, prix, taux));
+    }
+    let mut app = Application::nouvelle(etat);
+    app.onglet = Onglet::Stock;
+    app
+}
+
+/// La vente en cours : un panier de trois lignes, payé en espèces.
+fn vente_en_cours(nom: &str) -> Application {
+    let mut app = application_exemple(nom);
+    app.onglet = Onglet::Vente;
+    app.panier = vec![
+        ("Riz parfumé 5kg".to_string(), 1),
+        ("Sucre en poudre 1kg".to_string(), 2),
+        ("Café moulu 250g".to_string(), 1),
+    ];
+    app.saisie_recu = "20".into();
+    app
 }
 
 fn capturer(nom: &str, taille: Vec2, app: Application) {
@@ -83,4 +114,42 @@ fn apercu_fenetre_etroite() {
     let mut app = application_exemple("etroit");
     app.selection = Some("Savon de Marseille".into());
     capturer("fenetre_etroite", Vec2::new(520.0, 760.0), app);
+}
+
+#[test]
+#[ignore = "outil de design : lancer à la main"]
+fn apercu_vente_vide() {
+    let mut app = application_exemple("vente-vide");
+    app.onglet = Onglet::Vente;
+    capturer("vente_vide", Vec2::new(1040.0, 700.0), app);
+}
+
+#[test]
+#[ignore = "outil de design : lancer à la main"]
+fn apercu_vente_panier() {
+    capturer(
+        "vente_panier",
+        Vec2::new(1040.0, 700.0),
+        vente_en_cours("vente-panier"),
+    );
+}
+
+#[test]
+#[ignore = "outil de design : lancer à la main"]
+fn apercu_vente_ticket() {
+    let mut app = vente_en_cours("vente-ticket");
+    let etat = app.etat.as_mut().unwrap();
+    assert!(etat.encaisser(&app.panier, Moyen::Especes, "20"));
+    app.panier.clear();
+    capturer("vente_ticket", Vec2::new(1040.0, 700.0), app);
+}
+
+#[test]
+#[ignore = "outil de design : lancer à la main"]
+fn apercu_vente_etroite() {
+    capturer(
+        "vente_etroite",
+        Vec2::new(520.0, 900.0),
+        vente_en_cours("vente-etroite"),
+    );
 }

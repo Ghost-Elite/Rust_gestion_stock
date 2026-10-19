@@ -3,7 +3,7 @@ use gestion_stock_gui::chemin::chemin_par_defaut;
 use gestion_stock_gui::etat::Etat;
 use gestion_stock_gui::palette::appliquer;
 use gestion_stock_gui::textes::TITRE_FENETRE;
-use gestion_stock_gui::ui::Application;
+use gestion_stock_gui::ui::{Application, TAILLE_FENETRE, TAILLE_MINIMALE};
 
 fn main() -> eframe::Result {
     // Un fichier illisible n'est jamais écrasé : on ouvre alors un écran d'erreur lisible
@@ -16,8 +16,8 @@ fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title(TITRE_FENETRE)
-            .with_inner_size([960.0, 640.0])
-            .with_min_inner_size([640.0, 420.0]),
+            .with_inner_size(TAILLE_FENETRE)
+            .with_min_inner_size(TAILLE_MINIMALE),
         ..Default::default()
     };
     eframe::run_native(
