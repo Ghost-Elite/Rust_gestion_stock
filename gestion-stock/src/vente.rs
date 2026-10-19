@@ -71,55 +71,19 @@ impl Stock {
         }
 
         let mut lignes = Vec::new();
-        let mut par_taux: BTreeMap<u32, Montant> = BTreeMap::new();
         for (i, quantite) in cumul {
             let produit = &self.produits[i];
             let prix = produit
                 .prix
                 .ok_or_else(|| ErreurStock::PrixManquant(produit.nom.clone()))?;
-            let taux_bp = produit.taux_bp.unwrap_or(self.reglages.taux_defaut_bp);
-            let montant = prix.multiplier(quantite)?;
-            let somme = par_taux.entry(taux_bp).or_insert(Montant::ZERO);
-            *somme = somme.ajouter(montant)?;
             lignes.push(LigneVente {
                 nom: produit.nom.clone(),
                 quantite,
                 prix,
-                taux_bp,
+                taux_bp: produit.taux_bp.unwrap_or(self.reglages.taux_defaut_bp),
             });
         }
-
-        let mut groupes = Vec::new();
-        let mut total = Montant::ZERO;
-        for (taux_bp, somme) in par_taux {
-            let taux = i64::from(taux_bp);
-            let groupe = match self.reglages.profil {
-                // Le prix contient déjà la TVA : on la retrouve.
-                Profil::Europe => {
-                    let ttc = somme;
-                    let taxe = Montant(arrondi_demi_haut(ttc.0 * taux, 10_000 + taux));
-                    GroupeTaux {
-                        taux_bp,
-                        base: Montant(ttc.0 - taxe.0),
-                        taxe,
-                        ttc,
-                    }
-                }
-                // Le prix est hors taxe : on ajoute la taxe.
-                Profil::EtatsUnis => {
-                    let base = somme;
-                    let taxe = Montant(arrondi_demi_haut(base.0 * taux, 10_000));
-                    GroupeTaux {
-                        taux_bp,
-                        base,
-                        taxe,
-                        ttc: base.ajouter(taxe)?,
-                    }
-                }
-            };
-            total = total.ajouter(groupe.ttc)?;
-            groupes.push(groupe);
-        }
+        let (groupes, total) = detail_taxes(&lignes, self.reglages.profil)?;
         Ok(Devis {
             lignes,
             groupes,
@@ -128,9 +92,58 @@ impl Stock {
     }
 }
 
+/// Le détail par taux (du plus petit au plus grand) et le total d'une liste de lignes. Sert au
+/// devis, et aussi à réafficher le ticket d'une pièce déjà enregistrée : ses lignes contiennent
+/// leur propre prix et leur propre taux, donc le résultat ne dépend pas des prix d'aujourd'hui.
+pub fn detail_taxes(
+    lignes: &[LigneVente],
+    profil: Profil,
+) -> Result<(Vec<GroupeTaux>, Montant), ErreurStock> {
+    let mut par_taux: BTreeMap<u32, Montant> = BTreeMap::new();
+    for ligne in lignes {
+        let montant = ligne.prix.multiplier(ligne.quantite)?;
+        let somme = par_taux.entry(ligne.taux_bp).or_insert(Montant::ZERO);
+        *somme = somme.ajouter(montant)?;
+    }
+
+    let mut groupes = Vec::new();
+    let mut total = Montant::ZERO;
+    for (taux_bp, somme) in par_taux {
+        let taux = i64::from(taux_bp);
+        let groupe = match profil {
+            // Le prix contient déjà la TVA : on la retrouve.
+            Profil::Europe => {
+                let ttc = somme;
+                let taxe = Montant(arrondi_demi_haut(ttc.0 * taux, 10_000 + taux));
+                GroupeTaux {
+                    taux_bp,
+                    base: Montant(ttc.0 - taxe.0),
+                    taxe,
+                    ttc,
+                }
+            }
+            // Le prix est hors taxe : on ajoute la taxe.
+            Profil::EtatsUnis => {
+                let base = somme;
+                let taxe = Montant(arrondi_demi_haut(base.0 * taux, 10_000));
+                GroupeTaux {
+                    taux_bp,
+                    base,
+                    taxe,
+                    ttc: base.ajouter(taxe)?,
+                }
+            }
+        };
+        total = total.ajouter(groupe.ttc)?;
+        groupes.push(groupe);
+    }
+    Ok((groupes, total))
+}
+
 /// Comment le client a payé.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Moyen {
+    #[default]
     Especes,
     Carte,
     /// Chèque, virement, mobile money… : on note seulement que c'est payé.
@@ -1152,5 +1165,28 @@ mod tests {
         };
         s.definir_reglages(nouveau_taux).unwrap();
         assert_eq!(s.reglages().taux_defaut_bp, 550);
+    }
+
+    // ---- Détail des taxes d'une pièce déjà enregistrée ------------------------------------
+
+    #[test]
+    fn le_detail_des_taxes_d_une_piece_est_celui_du_devis() {
+        for s in [stock_europe(), stock_us()] {
+            let d = s
+                .devis(&demande(&[("Pain", 3), ("Lait", 2), ("Savon", 1)]))
+                .unwrap();
+            let (groupes, total) = detail_taxes(&d.lignes, s.reglages().profil).unwrap();
+            assert_eq!(groupes, d.groupes);
+            assert_eq!(total, d.total);
+        }
+        assert_eq!(
+            detail_taxes(&[], Profil::Europe),
+            Ok((Vec::new(), Montant::ZERO))
+        );
+    }
+
+    #[test]
+    fn le_moyen_de_paiement_par_defaut_est_les_especes() {
+        assert_eq!(Moyen::default(), Moyen::Especes);
     }
 }
