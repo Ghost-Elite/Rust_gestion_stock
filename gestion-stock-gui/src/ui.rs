@@ -468,9 +468,17 @@ fn historique(ui: &mut Ui, app: &Application) {
     }
 }
 
+/// Le produit choisi passe en premier : c'est là que l'on retire du stock (une vente) ou que
+/// l'on en ajoute (une livraison). Derrière le formulaire d'ajout et ses suggestions, ces
+/// boutons se retrouvaient hors de l'écran à la taille de fenêtre par défaut.
 fn contenu_commandes(ui: &mut Ui, app: &mut Application) {
-    carte(ui, |ui| formulaire_ajout(ui, app));
-    carte(ui, |ui| commandes_du_produit(ui, app));
+    if app.selection.is_some() {
+        carte(ui, |ui| commandes_du_produit(ui, app));
+        carte(ui, |ui| formulaire_ajout(ui, app));
+    } else {
+        carte(ui, |ui| formulaire_ajout(ui, app));
+        carte(ui, |ui| commandes_du_produit(ui, app));
+    }
 }
 
 /// Des produits courants à choisir d'un clic au lieu de les taper. Ils se filtrent pendant la
@@ -1026,5 +1034,31 @@ mod tests {
         h.run();
         assert_eq!(h.state().saisie_nom, "Huile de tournesol 1 L");
         assert_eq!(h.state().saisie_seuil, "9");
+    }
+
+    #[test]
+    fn les_commandes_de_sortie_sont_visibles_sans_defiler_a_la_taille_par_defaut() {
+        // La taille de la fenêtre au lancement (voir `main.rs`) : c'est ce que voit la personne.
+        let taille = Vec2::new(960.0, 640.0);
+        let mut h = Harness::builder().with_size(taille).build_ui_state(
+            |ui, app: &mut Application| {
+                // Le VRAI style : sans lui (polices, espacements), tout tiendrait à l'écran
+                // et le test ne verrait pas ce que voit la personne.
+                palette::appliquer(ui.ctx());
+                dessiner(ui, app);
+            },
+            app_avec_produits("sortie-visible"),
+        );
+        h.run();
+        h.get_by_label("Riz 5kg").click(); // la ligne doit elle-même être à l'écran
+        h.run();
+        let ecran = Rect::from_min_size(Pos2::ZERO, taille);
+        for nom in [CHAMP_QUANTITE, BOUTON_ENTREE, BOUTON_SORTIE] {
+            let rect = h.get_by_label(nom).rect();
+            assert!(
+                ecran.contains_rect(rect),
+                "« {nom} » est hors de l'écran : {rect:?} hors de {ecran:?}"
+            );
+        }
     }
 }
