@@ -20,6 +20,11 @@ pub enum ErreurStock {
     },
     Io(String),
     Utilisation(String),
+    /// La saisie (nettoyée) n'est pas un montant valide.
+    MontantInvalide(String),
+    /// La saisie (nettoyée) n'est pas un taux valide.
+    TauxInvalide(String),
+    MontantTropGrand,
 }
 
 impl fmt::Display for ErreurStock {
@@ -50,6 +55,15 @@ impl fmt::Display for ErreurStock {
             }
             ErreurStock::Io(message) => write!(f, "{message}"),
             ErreurStock::Utilisation(message) => write!(f, "{message}"),
+            ErreurStock::MontantInvalide(saisie) => {
+                write!(f, "Montant invalide : « {saisie} » (exemple : 12,50).")
+            }
+            ErreurStock::TauxInvalide(saisie) => {
+                write!(f, "Taux invalide : « {saisie} » (exemple : 5,5).")
+            }
+            ErreurStock::MontantTropGrand => {
+                write!(f, "Le montant dépasse la limite autorisée.")
+            }
         }
     }
 }
