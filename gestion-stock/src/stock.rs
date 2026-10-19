@@ -152,8 +152,16 @@ impl Stock {
         self.reglages
     }
 
+    /// Une fois qu'une vente est enregistrée, la devise et le profil sont figés : les montants du
+    /// journal sont des entiers en unités mineures, et les relire dans une autre devise (ou en
+    /// hors taxe au lieu de TTC) leur ferait dire autre chose. Le taux par défaut peut changer.
     pub fn definir_reglages(&mut self, reglages: Reglages) -> Result<(), ErreurStock> {
         self.verifier_taux(reglages.taux_defaut_bp)?;
+        if !self.pieces.is_empty()
+            && (reglages.devise != self.reglages.devise || reglages.profil != self.reglages.profil)
+        {
+            return Err(ErreurStock::ReglagesVerrouilles);
+        }
         self.reglages = reglages;
         Ok(())
     }

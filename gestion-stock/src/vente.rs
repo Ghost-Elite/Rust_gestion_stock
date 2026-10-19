@@ -1109,4 +1109,48 @@ mod tests {
         s.renommer_produit("Lait", "Lait entier").unwrap();
         s.supprimer_produit("Savon").unwrap();
     }
+
+    #[test]
+    fn la_devise_et_le_profil_ne_changent_plus_apres_la_premiere_vente() {
+        let mut s = stock_europe();
+        // Avant toute vente, tout se règle librement.
+        let usd = Reglages {
+            profil: Profil::EtatsUnis,
+            devise: Devise::Usd,
+            taux_defaut_bp: 825,
+        };
+        s.definir_reglages(usd).unwrap();
+        s.definir_reglages(Reglages::default()).unwrap();
+
+        s.encaisser(&demande(&[("Pain", 1)]), Moyen::Carte, Montant(0), QUAND)
+            .unwrap();
+        // Après une vente : changer la devise ou le profil changerait le sens des montants déjà
+        // enregistrés (1 250 centimes deviendraient 1 250 francs).
+        assert_eq!(
+            s.definir_reglages(usd),
+            Err(ErreurStock::ReglagesVerrouilles)
+        );
+        assert_eq!(
+            s.definir_reglages(Reglages {
+                devise: Devise::Xof,
+                ..Reglages::default()
+            }),
+            Err(ErreurStock::ReglagesVerrouilles)
+        );
+        assert_eq!(
+            s.definir_reglages(Reglages {
+                profil: Profil::EtatsUnis,
+                ..Reglages::default()
+            }),
+            Err(ErreurStock::ReglagesVerrouilles)
+        );
+        assert_eq!(s.reglages(), Reglages::default());
+        // Le taux par défaut, lui, peut toujours changer.
+        let nouveau_taux = Reglages {
+            taux_defaut_bp: 550,
+            ..Reglages::default()
+        };
+        s.definir_reglages(nouveau_taux).unwrap();
+        assert_eq!(s.reglages().taux_defaut_bp, 550);
+    }
 }

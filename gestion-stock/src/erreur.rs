@@ -46,6 +46,8 @@ pub enum ErreurStock {
     AnnulationNonPermise(u64),
     /// Ce produit figure dans des ventes : on ne le renomme ni ne le supprime plus.
     ProduitVendu(String),
+    /// La devise et le profil ne changent plus une fois qu'une vente est enregistrée.
+    ReglagesVerrouilles,
 }
 
 impl fmt::Display for ErreurStock {
@@ -99,6 +101,10 @@ impl fmt::Display for ErreurStock {
             ErreurStock::AnnulationNonPermise(numero) => write!(
                 f,
                 "La pièce n° {numero} est une annulation : on ne peut pas l'annuler."
+            ),
+            ErreurStock::ReglagesVerrouilles => write!(
+                f,
+                "La devise et le mode de prix ne peuvent plus changer : des ventes sont déjà enregistrées (leurs montants perdraient leur sens). Seul le taux par défaut peut encore changer."
             ),
             ErreurStock::ProduitVendu(nom) => write!(
                 f,
