@@ -6,15 +6,22 @@
 //! R;europe;EUR;2000             réglages : profil ; devise ; taux par défaut (centièmes de %)
 //! P;Café 250g;7;2;350;550       produit : nom ; quantité ; seuil ; prix ; taux (vides s'ils manquent)
 //! M;E;Café 250g;10              mouvement : E (entrée) ou S (sortie) ; nom ; quantité
+//! S;1;V;1700000000;60;800;E;1000;200;;<précédente>;<empreinte>
+//!                               pièce du journal : numéro ; genre (V vente, A annulation) ; heure UTC ;
+//!                               décalage en minutes ; total ; moyen (E, C, X) ; reçu ; rendu ;
+//!                               vente annulée ; empreinte précédente ; empreinte
+//! L;1;Pain;3;120;550            ligne de la pièce 1 : nom ; quantité ; prix ; taux
 //! ```
 //!
 //! Les fichiers de l'ancien format (sans ligne `F`, produits à quatre champs) se lisent
 //! toujours, sans perte.
 
 use crate::erreur::ErreurStock;
+use crate::horodatage::Horodatage;
 use crate::monnaie::{Devise, Montant};
 use crate::reglages::{Profil, Reglages};
 use crate::stock::{Genre, Mouvement, Stock};
+use crate::vente::{GenrePiece, LigneVente, Moyen, Piece};
 use std::fs;
 use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
@@ -78,6 +85,62 @@ fn lire_ligne(stock: &mut Stock, ligne: &str) -> Option<()> {
         ["P", nom, quantite, seuil, prix, taux] => {
             lire_produit(stock, nom, quantite, seuil, prix, taux)
         }
+        [
+            "S",
+            numero,
+            genre,
+            utc,
+            decalage,
+            total,
+            moyen,
+            recu,
+            rendu,
+            annulee,
+            precedente,
+            hash,
+        ] => {
+            let genre = match (*genre, *annulee) {
+                ("V", "") => GenrePiece::Vente,
+                ("A", de) if !de.is_empty() => GenrePiece::Annulation {
+                    de: de.parse().ok()?,
+                },
+                _ => return None,
+            };
+            if !est_empreinte(precedente) || !est_empreinte(hash) {
+                return None;
+            }
+            stock.pieces.push(Piece {
+                numero: numero.parse().ok()?,
+                genre,
+                horodatage: Horodatage {
+                    utc: utc.parse().ok()?,
+                    decalage_minutes: decalage.parse().ok()?,
+                },
+                lignes: Vec::new(),
+                moyen: Moyen::depuis_code(moyen)?,
+                total: Montant(total.parse().ok()?),
+                recu: Montant(recu.parse().ok()?),
+                rendu: Montant(rendu.parse().ok()?),
+                hash_precedent: precedente.to_string(),
+                hash: hash.to_string(),
+            });
+            Some(())
+        }
+        ["L", numero, nom, quantite, prix, taux] => {
+            let numero: u64 = numero.parse().ok()?;
+            // Une ligne appartient à la pièce S qui la précède immédiatement.
+            let piece = stock.pieces.last_mut()?;
+            if piece.numero != numero {
+                return None;
+            }
+            piece.lignes.push(LigneVente {
+                nom: nom.to_string(),
+                quantite: quantite.parse().ok()?,
+                prix: Montant(prix.parse().ok()?),
+                taux_bp: taux.parse().ok()?,
+            });
+            Some(())
+        }
         ["M", genre, nom, quantite] => {
             let genre = match *genre {
                 "E" => Genre::Entree,
@@ -93,6 +156,14 @@ fn lire_ligne(stock: &mut Stock, ligne: &str) -> Option<()> {
         }
         _ => None,
     }
+}
+
+/// Une empreinte SHA-256 : 64 chiffres hexadécimaux minuscules.
+fn est_empreinte(texte: &str) -> bool {
+    texte.len() == 64
+        && texte
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
 /// Ajoute un produit lu dans le fichier. `prix` et `taux` vides veulent dire « pas défini ».
@@ -151,9 +222,38 @@ pub fn sauvegarder(stock: &Stock, chemin: &Path) -> Result<(), ErreurStock> {
         };
         format!("M;{genre};{};{}\n", m.nom, m.quantite)
     });
+    let pieces = stock.pieces.iter().flat_map(|piece| {
+        let (genre, annulee) = match piece.genre {
+            GenrePiece::Vente => ("V", String::new()),
+            GenrePiece::Annulation { de } => ("A", de.to_string()),
+        };
+        let entete_piece = format!(
+            "S;{};{};{};{};{};{};{};{};{};{};{}\n",
+            piece.numero,
+            genre,
+            piece.horodatage.utc,
+            piece.horodatage.decalage_minutes,
+            piece.total.0,
+            piece.moyen.code(),
+            piece.recu.0,
+            piece.rendu.0,
+            annulee,
+            piece.hash_precedent,
+            piece.hash
+        );
+        let numero = piece.numero;
+        let lignes = piece.lignes.iter().map(move |l| {
+            format!(
+                "L;{numero};{};{};{};{}\n",
+                l.nom, l.quantite, l.prix.0, l.taux_bp
+            )
+        });
+        std::iter::once(entete_piece).chain(lignes)
+    });
     let texte: String = std::iter::once(entete)
         .chain(produits)
         .chain(mouvements)
+        .chain(pieces)
         .collect();
 
     let io = |e: std::io::Error| erreur_io(chemin, e);
@@ -383,6 +483,161 @@ mod tests {
                 charger(&chemin).unwrap_err(),
                 ErreurStock::FichierCorrompu { ligne },
                 "{contenu:?}"
+            );
+            std::fs::remove_file(&chemin).unwrap();
+        }
+    }
+
+    // ---- Journal : lignes S et L -----------------------------------------------------------
+
+    use crate::horodatage::Horodatage;
+    use crate::monnaie::Montant;
+    use crate::vente::{GenrePiece, Moyen};
+
+    const QUAND: Horodatage = Horodatage {
+        utc: 1_700_000_000,
+        decalage_minutes: 60,
+    };
+
+    fn stock_avec_ventes() -> Stock {
+        let mut s = Stock::nouveau();
+        for (nom, stock, prix, taux) in [("Pain", 20, 120, 550), ("Savon", 20, 250, 2000)] {
+            s.ajouter_produit(nom, 0).unwrap();
+            s.enregistrer_entree(nom, stock).unwrap();
+            s.definir_prix(nom, Some(Montant(prix)), Some(taux))
+                .unwrap();
+        }
+        let panier = |articles: &[(&str, u32)]| -> Vec<(String, u32)> {
+            articles.iter().map(|(n, q)| (n.to_string(), *q)).collect()
+        };
+        s.encaisser(
+            &panier(&[("Pain", 3), ("Savon", 1)]),
+            Moyen::Especes,
+            Montant(2000),
+            QUAND,
+        )
+        .unwrap();
+        s.encaisser(&panier(&[("Pain", 1)]), Moyen::Carte, Montant(0), QUAND)
+            .unwrap();
+        s.annuler(1, QUAND).unwrap();
+        s
+    }
+
+    #[test]
+    fn aller_retour_complet_avec_journal() {
+        let s = stock_avec_ventes();
+        let chemin = chemin_temp("journal");
+        sauvegarder(&s, &chemin).unwrap();
+        let relu = charger(&chemin).unwrap();
+        assert_eq!(relu.pieces(), s.pieces());
+        assert_eq!(relu.pieces().len(), 3);
+        assert_eq!(relu.pieces()[2].genre, GenrePiece::Annulation { de: 1 });
+        assert_eq!(relu.produits(), s.produits());
+        assert_eq!(relu.historique(), s.historique());
+        assert_eq!(relu.verifier_journal(), Ok(()));
+        // Le fichier relu se réécrit à l'identique.
+        let chemin2 = chemin_temp("journal-2");
+        sauvegarder(&relu, &chemin2).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&chemin).unwrap(),
+            std::fs::read_to_string(&chemin2).unwrap()
+        );
+        std::fs::remove_file(&chemin).unwrap();
+        std::fs::remove_file(&chemin2).unwrap();
+    }
+
+    #[test]
+    fn le_fichier_contient_les_lignes_s_et_l_documentees() {
+        let s = stock_avec_ventes();
+        let chemin = chemin_temp("format-journal");
+        sauvegarder(&s, &chemin).unwrap();
+        let texte = std::fs::read_to_string(&chemin).unwrap();
+        let lignes: Vec<&str> = texte.lines().collect();
+        let i = lignes.iter().position(|l| l.starts_with("S;1;")).unwrap();
+        let champs: Vec<&str> = lignes[i].split(';').collect();
+        assert_eq!(
+            &champs[..10],
+            [
+                "S",
+                "1",
+                "V",
+                "1700000000",
+                "60",
+                "610",
+                "E",
+                "2000",
+                "1390",
+                ""
+            ]
+        );
+        assert_eq!(champs[10], "0".repeat(64));
+        assert_eq!(champs[11].len(), 64);
+        assert_eq!(lignes[i + 1], "L;1;Pain;3;120;550");
+        assert_eq!(lignes[i + 2], "L;1;Savon;1;250;2000");
+        std::fs::remove_file(&chemin).unwrap();
+    }
+
+    #[test]
+    fn une_piece_modifiee_dans_le_fichier_se_charge_mais_ne_se_verifie_pas() {
+        let s = stock_avec_ventes();
+        let chemin = chemin_temp("piece-modifiee");
+        sauvegarder(&s, &chemin).unwrap();
+        let texte = std::fs::read_to_string(&chemin).unwrap();
+        // On « corrige » à la main le total de la vente n° 2 (120 -> 1).
+        let modifie: String = texte
+            .lines()
+            .map(|l| {
+                if l.starts_with("S;2;") {
+                    l.replacen(";120;", ";1;", 1)
+                } else {
+                    l.to_string()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+            + "\n";
+        assert_ne!(modifie, texte);
+        std::fs::write(&chemin, modifie).unwrap();
+        let relu = charger(&chemin).unwrap();
+        assert_eq!(
+            relu.verifier_journal(),
+            Err(ErreurStock::JournalAltere { numero: 2 })
+        );
+        std::fs::remove_file(&chemin).unwrap();
+    }
+
+    #[test]
+    fn une_ligne_s_ou_l_illisible_donne_fichier_corrompu_avec_son_numero() {
+        let h = "a".repeat(64);
+        let z = "0".repeat(64);
+        let cas = [
+            // moyen inconnu
+            format!("F;2\nS;1;V;1;0;100;Z;100;0;;{z};{h}\n"),
+            // nombre illisible
+            format!("F;2\nS;1;V;abc;0;100;C;100;0;;{z};{h}\n"),
+            // empreinte absente ou trop courte
+            "F;2\nS;1;V;1;0;100;C;100;0;;;\n".to_string(),
+            format!("F;2\nS;1;V;1;0;100;C;100;0;;{z};abc\n"),
+            // genre inconnu, annulation sans vente annulée, vente avec vente annulée
+            format!("F;2\nS;1;Q;1;0;100;C;100;0;;{z};{h}\n"),
+            format!("F;2\nS;1;A;1;0;-100;C;-100;0;;{z};{h}\n"),
+            format!("F;2\nS;1;V;1;0;100;C;100;0;7;{z};{h}\n"),
+            // ligne L sans pièce S, ou d'un autre numéro
+            "F;2\nL;1;Pain;1;100;0\n".to_string(),
+            format!("F;2\nS;1;V;1;0;100;C;100;0;;{z};{h}\nL;2;Pain;1;100;0\n"),
+            // ligne L à quantité illisible
+            format!("F;2\nS;1;V;1;0;100;C;100;0;;{z};{h}\nL;1;Pain;-1;100;0\n"),
+        ];
+        for (index, contenu) in cas.iter().enumerate() {
+            let chemin = chemin_temp("journal-illisible");
+            std::fs::write(&chemin, contenu).unwrap();
+            let ligne_attendue = if index == 8 || index == 9 { 3 } else { 2 };
+            assert_eq!(
+                charger(&chemin).unwrap_err(),
+                ErreurStock::FichierCorrompu {
+                    ligne: ligne_attendue
+                },
+                "cas {index} : {contenu:?}"
             );
             std::fs::remove_file(&chemin).unwrap();
         }

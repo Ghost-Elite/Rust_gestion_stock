@@ -188,12 +188,30 @@ impl Stock {
         self.appliquer(i, Genre::Sortie, quantite, reste)
     }
 
-    /// Ordre des vérifications : nom invalide, produit inconnu, nom déjà pris par un AUTRE produit.
+    /// Un produit qui figure dans une pièce du journal garde son nom pour toujours : le journal
+    /// ne se modifie jamais, et une annulation doit pouvoir retrouver le produit à remettre en stock.
+    fn verifier_non_vendu(&self, i: usize) -> Result<(), ErreurStock> {
+        let nom = &self.produits[i].nom;
+        let cherche = nom.to_lowercase();
+        let vendu = self
+            .pieces
+            .iter()
+            .flat_map(|piece| piece.lignes.iter())
+            .any(|ligne| ligne.nom.to_lowercase() == cherche);
+        if vendu {
+            return Err(ErreurStock::ProduitVendu(nom.clone()));
+        }
+        Ok(())
+    }
+
+    /// Ordre des vérifications : nom invalide, produit inconnu, produit déjà vendu, nom déjà
+    /// pris par un AUTRE produit.
     /// Changer seulement la casse ou les espaces du même produit est permis.
     /// Le nouveau nom remplace aussi l'ancien dans tout l'historique.
     pub fn renommer_produit(&mut self, ancien: &str, nouveau: &str) -> Result<(), ErreurStock> {
         let nouveau = nettoyer_nom(nouveau)?;
         let i = self.chercher(ancien)?;
+        self.verifier_non_vendu(i)?;
         if let Some(j) = self.position(&nouveau)
             && j != i
         {
@@ -212,6 +230,7 @@ impl Stock {
     /// Retire le produit ; l'historique est conservé tel quel.
     pub fn supprimer_produit(&mut self, nom: &str) -> Result<(), ErreurStock> {
         let i = self.chercher(nom)?;
+        self.verifier_non_vendu(i)?;
         self.produits.remove(i);
         Ok(())
     }

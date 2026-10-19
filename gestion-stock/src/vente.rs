@@ -279,6 +279,86 @@ impl Stock {
         Ok(&self.pieces[i])
     }
 
+    /// Annule une vente EN ENTIER, par une écriture inverse : une nouvelle pièce de total négatif
+    /// entre dans le journal et le stock est remis. La vente d'origine n'est pas touchée.
+    /// Une vente ne s'annule qu'une fois, et une annulation ne s'annule pas.
+    pub fn annuler(&mut self, numero: u64, quand: Horodatage) -> Result<&Piece, ErreurStock> {
+        let origine = self
+            .pieces
+            .iter()
+            .find(|p| p.numero == numero)
+            .ok_or(ErreurStock::PieceInconnue(numero))?;
+        if matches!(origine.genre, GenrePiece::Annulation { .. }) {
+            return Err(ErreurStock::AnnulationNonPermise(numero));
+        }
+        if self
+            .pieces
+            .iter()
+            .any(|p| p.genre == GenrePiece::Annulation { de: numero })
+        {
+            return Err(ErreurStock::DejaAnnulee(numero));
+        }
+        let origine = origine.clone();
+
+        // Tout est vérifié avant de remettre le moindre article en stock.
+        let mut positions = Vec::with_capacity(origine.lignes.len());
+        let mut remises: BTreeMap<usize, u32> = BTreeMap::new();
+        for ligne in &origine.lignes {
+            let i = self.chercher(&ligne.nom)?;
+            let cumul = remises.entry(i).or_insert(0);
+            *cumul = cumul
+                .checked_add(ligne.quantite)
+                .ok_or(ErreurStock::QuantiteTropGrande)?;
+            positions.push(i);
+        }
+        for (i, remise) in &remises {
+            self.produits[*i]
+                .quantite
+                .checked_add(*remise)
+                .ok_or(ErreurStock::QuantiteTropGrande)?;
+        }
+        let total = origine
+            .total
+            .0
+            .checked_neg()
+            .map(Montant)
+            .ok_or(ErreurStock::MontantTropGrand)?;
+        let nouveau_numero = match self.pieces.last() {
+            Some(derniere) => derniere
+                .numero
+                .checked_add(1)
+                .ok_or_else(|| ErreurStock::Utilisation("Le journal est plein.".to_string()))?,
+            None => 1,
+        };
+
+        for (ligne, i) in origine.lignes.iter().zip(positions) {
+            let produit = &mut self.produits[i];
+            produit.quantite = produit.quantite.saturating_add(ligne.quantite);
+            self.historique.push(Mouvement {
+                genre: GenreStock::Entree,
+                nom: produit.nom.clone(),
+                quantite: ligne.quantite,
+            });
+        }
+        let hash_precedent = self.dernier_hash();
+        let mut piece = Piece {
+            numero: nouveau_numero,
+            genre: GenrePiece::Annulation { de: numero },
+            horodatage: quand,
+            lignes: origine.lignes,
+            moyen: origine.moyen,
+            total,
+            recu: total,
+            rendu: Montant::ZERO,
+            hash_precedent,
+            hash: String::new(),
+        };
+        piece.hash = empreinte(&piece.hash_precedent, &piece);
+        let i = self.pieces.len();
+        self.pieces.push(piece);
+        Ok(&self.pieces[i])
+    }
+
     /// Recalcule toute la chaîne. Une pièce modifiée, retirée, ajoutée ou déplacée donne
     /// `JournalAltere` avec le numéro de la première pièce qui ne correspond plus.
     ///
@@ -907,5 +987,126 @@ mod tests {
             .unwrap();
         assert_eq!((p.total, p.rendu), (Montant(0), Montant(0)));
         assert_eq!(quantite_de(&s, "Sac"), 3);
+    }
+
+    // ---- Annuler ---------------------------------------------------------------------------
+
+    const PLUS_TARD: Horodatage = Horodatage {
+        utc: 1_700_000_500,
+        decalage_minutes: 60,
+    };
+
+    #[test]
+    fn annuler_cree_une_ecriture_inverse_et_remet_le_stock() {
+        let mut s = stock_europe(); // Pain : 10
+        let vente = s
+            .encaisser(&demande(&[("Pain", 3)]), Moyen::Carte, Montant(0), QUAND)
+            .unwrap()
+            .clone();
+        assert_eq!(quantite_de(&s, "Pain"), 7);
+
+        let annulation = s.annuler(1, PLUS_TARD).unwrap().clone();
+        assert_eq!(annulation.numero, 2);
+        assert_eq!(annulation.genre, GenrePiece::Annulation { de: 1 });
+        assert_eq!(annulation.total, Montant(-360));
+        assert_eq!(
+            (annulation.recu, annulation.rendu),
+            (Montant(-360), Montant(0))
+        );
+        assert_eq!(annulation.moyen, Moyen::Carte);
+        assert_eq!(annulation.horodatage, PLUS_TARD);
+        assert_eq!(annulation.lignes, vente.lignes);
+        assert_eq!(annulation.hash_precedent, vente.hash);
+        assert_eq!(quantite_de(&s, "Pain"), 10);
+        assert_eq!(
+            s.historique().last(),
+            Some(&Mouvement {
+                genre: GenreStock::Entree,
+                nom: "Pain".into(),
+                quantite: 3
+            })
+        );
+        assert_eq!(s.verifier_journal(), Ok(()));
+    }
+
+    #[test]
+    fn annuler_garde_le_moyen_de_paiement_de_la_vente() {
+        let mut s = stock_europe();
+        s.encaisser(
+            &demande(&[("Pain", 1)]),
+            Moyen::Especes,
+            Montant(500),
+            QUAND,
+        )
+        .unwrap();
+        assert_eq!(s.annuler(1, PLUS_TARD).unwrap().moyen, Moyen::Especes);
+    }
+
+    #[test]
+    fn une_vente_ne_s_annule_qu_une_fois() {
+        let mut s = stock_europe();
+        s.encaisser(&demande(&[("Pain", 3)]), Moyen::Carte, Montant(0), QUAND)
+            .unwrap();
+        s.annuler(1, PLUS_TARD).unwrap();
+        let avant = etat_de(&s);
+        assert_eq!(s.annuler(1, PLUS_TARD), Err(ErreurStock::DejaAnnulee(1)));
+        assert_eq!(etat_de(&s), avant);
+    }
+
+    #[test]
+    fn on_n_annule_pas_une_annulation_ni_une_piece_inconnue() {
+        let mut s = stock_europe();
+        s.encaisser(&demande(&[("Pain", 3)]), Moyen::Carte, Montant(0), QUAND)
+            .unwrap();
+        s.annuler(1, PLUS_TARD).unwrap();
+        let avant = etat_de(&s);
+        assert_eq!(
+            s.annuler(2, PLUS_TARD),
+            Err(ErreurStock::AnnulationNonPermise(2))
+        );
+        assert_eq!(
+            s.annuler(99, PLUS_TARD),
+            Err(ErreurStock::PieceInconnue(99))
+        );
+        assert_eq!(etat_de(&s), avant);
+    }
+
+    #[test]
+    fn une_annulation_qui_ferait_deborder_le_stock_est_refusee() {
+        let mut s = Stock::nouveau();
+        produit(&mut s, "Pain", 0, Some(100), Some(0));
+        s.enregistrer_entree("Pain", u32::MAX).unwrap();
+        s.encaisser(&demande(&[("Pain", 2)]), Moyen::Carte, Montant(0), QUAND)
+            .unwrap();
+        s.enregistrer_entree("Pain", 2).unwrap(); // le stock est de nouveau à u32::MAX
+        let avant = etat_de(&s);
+        assert_eq!(
+            s.annuler(1, PLUS_TARD),
+            Err(ErreurStock::QuantiteTropGrande)
+        );
+        assert_eq!(etat_de(&s), avant);
+    }
+
+    #[test]
+    fn un_produit_vendu_ne_se_renomme_ni_ne_se_supprime() {
+        let mut s = stock_europe();
+        s.encaisser(&demande(&[("Pain", 1)]), Moyen::Carte, Montant(0), QUAND)
+            .unwrap();
+        assert_eq!(
+            s.renommer_produit("Pain", "Pain complet"),
+            Err(ErreurStock::ProduitVendu("Pain".into()))
+        );
+        assert_eq!(
+            s.renommer_produit(" pain ", "PAIN"),
+            Err(ErreurStock::ProduitVendu("Pain".into()))
+        );
+        assert_eq!(
+            s.supprimer_produit("Pain"),
+            Err(ErreurStock::ProduitVendu("Pain".into()))
+        );
+        assert_eq!(quantite_de(&s, "Pain"), 9);
+        // Un produit jamais vendu reste modifiable.
+        s.renommer_produit("Lait", "Lait entier").unwrap();
+        s.supprimer_produit("Savon").unwrap();
     }
 }

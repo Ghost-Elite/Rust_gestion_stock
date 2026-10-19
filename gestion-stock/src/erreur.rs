@@ -38,6 +38,14 @@ pub enum ErreurStock {
     JournalAltere {
         numero: u64,
     },
+    /// Aucune pièce de ce numéro dans le journal.
+    PieceInconnue(u64),
+    /// La vente de ce numéro a déjà été annulée.
+    DejaAnnulee(u64),
+    /// La pièce de ce numéro est elle-même une annulation.
+    AnnulationNonPermise(u64),
+    /// Ce produit figure dans des ventes : on ne le renomme ni ne le supprime plus.
+    ProduitVendu(String),
 }
 
 impl fmt::Display for ErreurStock {
@@ -81,6 +89,20 @@ impl fmt::Display for ErreurStock {
             ErreurStock::MontantInsuffisant { du, recu } => write!(
                 f,
                 "Montant reçu insuffisant : {recu} reçu(s) pour {du} à payer."
+            ),
+            ErreurStock::PieceInconnue(numero) => {
+                write!(f, "Aucune pièce n° {numero} dans le journal.")
+            }
+            ErreurStock::DejaAnnulee(numero) => {
+                write!(f, "La vente n° {numero} a déjà été annulée.")
+            }
+            ErreurStock::AnnulationNonPermise(numero) => write!(
+                f,
+                "La pièce n° {numero} est une annulation : on ne peut pas l'annuler."
+            ),
+            ErreurStock::ProduitVendu(nom) => write!(
+                f,
+                "Le produit « {nom} » figure dans des ventes : il ne peut plus être renommé ni supprimé (le journal de caisse doit rester cohérent)."
             ),
             ErreurStock::JournalAltere { numero } => write!(
                 f,
