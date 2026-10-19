@@ -25,6 +25,10 @@ pub enum ErreurStock {
     /// La saisie (nettoyée) n'est pas un taux valide.
     TauxInvalide(String),
     MontantTropGrand,
+    /// Aucun article dans le panier.
+    PanierVide,
+    /// Ce produit n'a pas de prix : on ne peut pas le vendre.
+    PrixManquant(String),
 }
 
 impl fmt::Display for ErreurStock {
@@ -64,6 +68,11 @@ impl fmt::Display for ErreurStock {
             ErreurStock::MontantTropGrand => {
                 write!(f, "Le montant dépasse la limite autorisée.")
             }
+            ErreurStock::PanierVide => write!(f, "Le panier est vide."),
+            ErreurStock::PrixManquant(nom) => write!(
+                f,
+                "Le produit « {nom} » n'a pas de prix : donnez-lui un prix avant de le vendre."
+            ),
         }
     }
 }

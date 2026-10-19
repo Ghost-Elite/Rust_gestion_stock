@@ -5,3 +5,4 @@ pub mod monnaie;
 pub mod reglages;
 pub mod stock;
 pub mod stockage;
+pub mod vente;

@@ -72,7 +72,7 @@ impl Stock {
     }
 
     /// Position du produit, ou `ProduitInconnu` avec le nom tel que tapé (nettoyé).
-    fn chercher(&self, nom: &str) -> Result<usize, ErreurStock> {
+    pub(crate) fn chercher(&self, nom: &str) -> Result<usize, ErreurStock> {
         self.position(nom)
             .ok_or_else(|| ErreurStock::ProduitInconnu(nom.trim().to_string()))
     }
