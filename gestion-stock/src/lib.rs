@@ -1,6 +1,7 @@
 pub mod commandes;
 pub mod erreur;
 pub mod horodatage;
+pub(crate) mod journal;
 pub mod monnaie;
 pub mod reglages;
 pub mod stock;

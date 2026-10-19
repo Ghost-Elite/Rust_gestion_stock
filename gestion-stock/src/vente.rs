@@ -5,9 +5,11 @@
 //! ce que fait un ticket de caisse, et le total reste exactement la somme des lignes.
 
 use crate::erreur::ErreurStock;
-use crate::monnaie::Montant;
+use crate::horodatage::Horodatage;
+use crate::journal::{HASH_INITIAL, empreinte};
+use crate::monnaie::{MONTANT_MAX, Montant};
 use crate::reglages::Profil;
-use crate::stock::Stock;
+use crate::stock::{Genre as GenreStock, Mouvement, Stock};
 use std::collections::BTreeMap;
 
 /// Une ligne d'une vente : le prix et le taux sont ceux du moment de la vente, ils ne
@@ -123,6 +125,180 @@ impl Stock {
             groupes,
             total,
         })
+    }
+}
+
+/// Comment le client a payé.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Moyen {
+    Especes,
+    Carte,
+    /// Chèque, virement, mobile money… : on note seulement que c'est payé.
+    Autre,
+}
+
+impl Moyen {
+    /// Le code utilisé dans le fichier de données.
+    pub fn code(self) -> &'static str {
+        match self {
+            Moyen::Especes => "E",
+            Moyen::Carte => "C",
+            Moyen::Autre => "X",
+        }
+    }
+
+    pub fn depuis_code(code: &str) -> Option<Moyen> {
+        match code {
+            "E" => Some(Moyen::Especes),
+            "C" => Some(Moyen::Carte),
+            "X" => Some(Moyen::Autre),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GenrePiece {
+    Vente,
+    /// Une annulation TOTALE : écriture inverse de la vente numéro `de`.
+    Annulation {
+        de: u64,
+    },
+}
+
+/// Une écriture du journal. Une fois enregistrée, elle ne change plus jamais : l'empreinte
+/// `hash` couvre son contenu ET l'empreinte de la pièce précédente.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Piece {
+    /// Numérotation continue 1, 2, 3… sans trou, ventes et annulations confondues.
+    pub numero: u64,
+    pub genre: GenrePiece,
+    pub horodatage: Horodatage,
+    /// Toujours en quantités positives ; c'est le genre qui dit si on retire ou remet du stock.
+    pub lignes: Vec<LigneVente>,
+    pub moyen: Moyen,
+    /// Signé : négatif pour une annulation.
+    pub total: Montant,
+    pub recu: Montant,
+    pub rendu: Montant,
+    pub hash_precedent: String,
+    pub hash: String,
+}
+
+impl Stock {
+    pub fn pieces(&self) -> &[Piece] {
+        &self.pieces
+    }
+
+    fn dernier_hash(&self) -> String {
+        self.pieces
+            .last()
+            .map_or_else(|| HASH_INITIAL.to_string(), |p| p.hash.clone())
+    }
+
+    /// Encaisse un panier : le stock baisse, une pièce numérotée entre dans le journal.
+    ///
+    /// - Espèces : `recu` doit couvrir le total, et le rendu est la différence.
+    /// - Carte, autre : le client a payé exactement le total, `recu` est ignoré.
+    ///
+    /// Tout est vérifié AVANT de modifier quoi que ce soit : si un seul produit manque de
+    /// stock, ou si le paiement est insuffisant, rien ne change, pas même le numéro de ticket.
+    pub fn encaisser(
+        &mut self,
+        demande: &[(String, u32)],
+        moyen: Moyen,
+        recu: Montant,
+        quand: Horodatage,
+    ) -> Result<&Piece, ErreurStock> {
+        let devis = self.devis(demande)?;
+        let devise = self.reglages.devise;
+        let (recu, rendu) = match moyen {
+            Moyen::Especes => {
+                if recu > MONTANT_MAX {
+                    return Err(ErreurStock::MontantTropGrand);
+                }
+                if recu < devis.total {
+                    return Err(ErreurStock::MontantInsuffisant {
+                        du: devise.formater(devis.total),
+                        recu: devise.formater(recu),
+                    });
+                }
+                (recu, Montant(recu.0 - devis.total.0))
+            }
+            Moyen::Carte | Moyen::Autre => (devis.total, Montant::ZERO),
+        };
+
+        // Le stock de CHAQUE ligne (déjà cumulée par produit) est vérifié avant tout changement.
+        let mut positions = Vec::with_capacity(devis.lignes.len());
+        for ligne in &devis.lignes {
+            let i = self.chercher(&ligne.nom)?;
+            let disponible = self.produits[i].quantite;
+            if disponible < ligne.quantite {
+                return Err(ErreurStock::StockInsuffisant {
+                    nom: self.produits[i].nom.clone(),
+                    disponible,
+                    demandee: ligne.quantite,
+                });
+            }
+            positions.push(i);
+        }
+        let numero = match self.pieces.last() {
+            Some(derniere) => derniere
+                .numero
+                .checked_add(1)
+                .ok_or_else(|| ErreurStock::Utilisation("Le journal est plein.".to_string()))?,
+            None => 1,
+        };
+
+        // À partir d'ici plus rien ne peut échouer : on applique.
+        for (ligne, i) in devis.lignes.iter().zip(positions) {
+            let produit = &mut self.produits[i];
+            produit.quantite -= ligne.quantite;
+            self.historique.push(Mouvement {
+                genre: GenreStock::Sortie,
+                nom: produit.nom.clone(),
+                quantite: ligne.quantite,
+            });
+        }
+        let hash_precedent = self.dernier_hash();
+        let mut piece = Piece {
+            numero,
+            genre: GenrePiece::Vente,
+            horodatage: quand,
+            lignes: devis.lignes,
+            moyen,
+            total: devis.total,
+            recu,
+            rendu,
+            hash_precedent,
+            hash: String::new(),
+        };
+        piece.hash = empreinte(&piece.hash_precedent, &piece);
+        let i = self.pieces.len();
+        self.pieces.push(piece);
+        Ok(&self.pieces[i])
+    }
+
+    /// Recalcule toute la chaîne. Une pièce modifiée, retirée, ajoutée ou déplacée donne
+    /// `JournalAltere` avec le numéro de la première pièce qui ne correspond plus.
+    ///
+    /// Cela détecte une modification maladroite ou accidentelle. Ce n'est PAS une protection
+    /// contre quelqu'un qui réécrirait tout le fichier en recalculant les empreintes.
+    pub fn verifier_journal(&self) -> Result<(), ErreurStock> {
+        let mut attendu = HASH_INITIAL.to_string();
+        for (index, piece) in self.pieces.iter().enumerate() {
+            let numero_attendu = index as u64 + 1;
+            if piece.numero != numero_attendu
+                || piece.hash_precedent != attendu
+                || piece.hash != empreinte(&piece.hash_precedent, piece)
+            {
+                return Err(ErreurStock::JournalAltere {
+                    numero: piece.numero,
+                });
+            }
+            attendu = piece.hash.clone();
+        }
+        Ok(())
     }
 }
 
@@ -395,5 +571,341 @@ mod tests {
             .unwrap();
         let taux: Vec<u32> = d.groupes.iter().map(|g| g.taux_bp).collect();
         assert_eq!(taux, [550, 2000]);
+    }
+
+    // ---- Encaisser -------------------------------------------------------------------------
+
+    use crate::horodatage::Horodatage;
+    use crate::stock::{Genre as GenreStock, Mouvement, Produit};
+
+    const QUAND: Horodatage = Horodatage {
+        utc: 1_700_000_000,
+        decalage_minutes: 60,
+    };
+
+    fn zeros() -> String {
+        "0".repeat(64)
+    }
+
+    /// Ce qui compte pour « rien n'a changé » : produits, historique de stock et journal.
+    fn etat_de(s: &Stock) -> (Vec<Produit>, Vec<Mouvement>, Vec<Piece>) {
+        (
+            s.produits().into_iter().cloned().collect(),
+            s.historique().to_vec(),
+            s.pieces().to_vec(),
+        )
+    }
+
+    fn quantite_de(s: &Stock, nom: &str) -> u32 {
+        s.produits()
+            .into_iter()
+            .find(|p| p.nom == nom)
+            .map(|p| p.quantite)
+            .unwrap()
+    }
+
+    #[test]
+    fn encaisser_retire_le_stock_numerote_et_chaine() {
+        let mut s = stock_europe();
+        let p1 = s
+            .encaisser(&demande(&[("Pain", 3)]), Moyen::Carte, Montant(0), QUAND)
+            .unwrap()
+            .clone();
+        assert_eq!(p1.numero, 1);
+        assert_eq!(p1.genre, GenrePiece::Vente);
+        assert_eq!(p1.total, Montant(360));
+        assert_eq!(p1.moyen, Moyen::Carte);
+        assert_eq!((p1.recu, p1.rendu), (Montant(360), Montant(0)));
+        assert_eq!(p1.horodatage, QUAND);
+        assert_eq!(p1.hash_precedent, zeros());
+        assert_eq!(p1.hash.len(), 64);
+        assert!(
+            p1.hash
+                .bytes()
+                .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+        );
+        assert_eq!(
+            p1.lignes,
+            [LigneVente {
+                nom: "Pain".into(),
+                quantite: 3,
+                prix: Montant(120),
+                taux_bp: 550
+            }]
+        );
+        assert_eq!(quantite_de(&s, "Pain"), 7);
+        assert_eq!(
+            s.historique().last(),
+            Some(&Mouvement {
+                genre: GenreStock::Sortie,
+                nom: "Pain".into(),
+                quantite: 3
+            })
+        );
+
+        let p2 = s
+            .encaisser(&demande(&[("Lait", 1)]), Moyen::Autre, Montant(0), QUAND)
+            .unwrap()
+            .clone();
+        assert_eq!(p2.numero, 2);
+        assert_eq!(p2.hash_precedent, p1.hash);
+        assert_ne!(p2.hash, p1.hash);
+        assert_eq!(s.pieces().len(), 2);
+        assert_eq!(s.verifier_journal(), Ok(()));
+    }
+
+    #[test]
+    fn especes_rendu_et_refus() {
+        let panier = demande(&[("Pain", 3), ("Lait", 2), ("Savon", 1)]); // 8,00 €
+        let mut s = stock_europe();
+        let p = s
+            .encaisser(&panier, Moyen::Especes, Montant(1000), QUAND)
+            .unwrap();
+        assert_eq!(
+            (p.total, p.recu, p.rendu),
+            (Montant(800), Montant(1000), Montant(200))
+        );
+        let p = s
+            .encaisser(&panier, Moyen::Especes, Montant(800), QUAND)
+            .unwrap();
+        assert_eq!((p.recu, p.rendu), (Montant(800), Montant(0)));
+
+        let avant = etat_de(&s);
+        assert_eq!(
+            s.encaisser(&panier, Moyen::Especes, Montant(700), QUAND)
+                .unwrap_err(),
+            ErreurStock::MontantInsuffisant {
+                du: "8,00\u{a0}€".into(),
+                recu: "7,00\u{a0}€".into()
+            }
+        );
+        assert!(
+            s.encaisser(&panier, Moyen::Especes, Montant(-5), QUAND)
+                .unwrap_err()
+                .to_string()
+                .contains("8,00")
+        );
+        assert_eq!(etat_de(&s), avant);
+    }
+
+    #[test]
+    fn carte_et_autre_ignorent_le_montant_recu() {
+        let mut s = stock_europe();
+        for (moyen, recu) in [(Moyen::Carte, 0), (Moyen::Autre, 99_999)] {
+            let p = s
+                .encaisser(&demande(&[("Pain", 1)]), moyen, Montant(recu), QUAND)
+                .unwrap();
+            assert_eq!((p.recu, p.rendu), (p.total, Montant(0)), "{moyen:?}");
+        }
+    }
+
+    #[test]
+    fn un_produit_en_manque_empeche_toute_la_vente() {
+        let mut s = Stock::nouveau();
+        produit(&mut s, "Pain", 10, Some(120), Some(550));
+        produit(&mut s, "Lait", 2, Some(95), Some(550));
+        let avant = etat_de(&s);
+        assert_eq!(
+            s.encaisser(
+                &demande(&[("Pain", 3), ("Lait", 5)]),
+                Moyen::Carte,
+                Montant(0),
+                QUAND
+            )
+            .unwrap_err(),
+            ErreurStock::StockInsuffisant {
+                nom: "Lait".into(),
+                disponible: 2,
+                demandee: 5
+            }
+        );
+        assert_eq!(etat_de(&s), avant);
+        assert_eq!(quantite_de(&s, "Pain"), 10);
+    }
+
+    #[test]
+    fn un_echec_ne_consomme_pas_de_numero() {
+        let mut s = stock_europe();
+        assert_eq!(
+            s.encaisser(&demande(&[("Riz", 1)]), Moyen::Carte, Montant(0), QUAND)
+                .unwrap_err(),
+            ErreurStock::PrixManquant("Riz".into())
+        );
+        assert!(
+            s.encaisser(&demande(&[("Pain", 99)]), Moyen::Carte, Montant(0), QUAND)
+                .is_err()
+        );
+        let p = s
+            .encaisser(&demande(&[("Pain", 1)]), Moyen::Carte, Montant(0), QUAND)
+            .unwrap();
+        assert_eq!(p.numero, 1);
+        assert_eq!(p.hash_precedent, zeros());
+    }
+
+    #[test]
+    fn un_produit_saisi_deux_fois_est_cumule_pour_le_stock() {
+        let mut s = stock_europe(); // Pain : 10
+        let avant = etat_de(&s);
+        assert_eq!(
+            s.encaisser(
+                &demande(&[("Pain", 6), ("pain", 5)]),
+                Moyen::Carte,
+                Montant(0),
+                QUAND
+            )
+            .unwrap_err(),
+            ErreurStock::StockInsuffisant {
+                nom: "Pain".into(),
+                disponible: 10,
+                demandee: 11
+            }
+        );
+        assert_eq!(etat_de(&s), avant);
+        // Et 6 + 4 = 10 passe, en une seule ligne de stock.
+        s.encaisser(
+            &demande(&[("Pain", 6), ("pain", 4)]),
+            Moyen::Carte,
+            Montant(0),
+            QUAND,
+        )
+        .unwrap();
+        assert_eq!(quantite_de(&s, "Pain"), 0);
+    }
+
+    #[test]
+    fn le_journal_se_verifie_et_detecte_une_alteration() {
+        let mut s = stock_europe();
+        for article in [("Pain", 1), ("Lait", 1), ("Savon", 1)] {
+            s.encaisser(&demande(&[article]), Moyen::Carte, Montant(0), QUAND)
+                .unwrap();
+        }
+        assert_eq!(s.verifier_journal(), Ok(()));
+        let intact = s.pieces.clone();
+
+        s.pieces[1].total = Montant(1);
+        assert_eq!(
+            s.verifier_journal(),
+            Err(ErreurStock::JournalAltere { numero: 2 })
+        );
+        s.pieces = intact.clone();
+
+        s.pieces[0].lignes[0].quantite = 9;
+        assert_eq!(
+            s.verifier_journal(),
+            Err(ErreurStock::JournalAltere { numero: 1 })
+        );
+        s.pieces = intact.clone();
+
+        // Une pièce retirée du milieu : la suivante ne se raccroche plus à la chaîne.
+        s.pieces.remove(1);
+        assert_eq!(
+            s.verifier_journal(),
+            Err(ErreurStock::JournalAltere { numero: 3 })
+        );
+        s.pieces = intact.clone();
+
+        // Deux pièces échangées.
+        s.pieces.swap(0, 1);
+        assert!(matches!(
+            s.verifier_journal(),
+            Err(ErreurStock::JournalAltere { .. })
+        ));
+        s.pieces = intact.clone();
+
+        // L'empreinte précédente falsifiée.
+        s.pieces[2].hash_precedent = zeros();
+        assert_eq!(
+            s.verifier_journal(),
+            Err(ErreurStock::JournalAltere { numero: 3 })
+        );
+        s.pieces = intact;
+        assert_eq!(s.verifier_journal(), Ok(()));
+    }
+
+    #[test]
+    fn un_journal_vide_est_valide() {
+        assert_eq!(Stock::nouveau().verifier_journal(), Ok(()));
+    }
+
+    #[test]
+    fn l_empreinte_est_celle_du_format_documente() {
+        // Valeurs calculées une fois avec `hashlib` (Python) ET `shasum -a 256` sur le texte
+        // exact : empreinte précédente + « \n » + texte canonique de la pièce.
+        let piece = Piece {
+            numero: 1,
+            genre: GenrePiece::Vente,
+            horodatage: Horodatage {
+                utc: 1_700_000_000,
+                decalage_minutes: 60,
+            },
+            lignes: vec![LigneVente {
+                nom: "Pain".into(),
+                quantite: 3,
+                prix: Montant(120),
+                taux_bp: 550,
+            }],
+            moyen: Moyen::Carte,
+            total: Montant(360),
+            recu: Montant(360),
+            rendu: Montant(0),
+            hash_precedent: zeros(),
+            hash: String::new(),
+        };
+        let hash1 = crate::journal::empreinte(&zeros(), &piece);
+        assert_eq!(
+            hash1,
+            "cda9fc85affa82d56d8299d062cfe99128d8ea12e3647b53fc92fda60ba17096"
+        );
+        let annulation = Piece {
+            numero: 2,
+            genre: GenrePiece::Annulation { de: 1 },
+            horodatage: Horodatage {
+                utc: 1_700_000_100,
+                decalage_minutes: 60,
+            },
+            total: Montant(-360),
+            recu: Montant(-360),
+            hash_precedent: hash1.clone(),
+            ..piece
+        };
+        assert_eq!(
+            crate::journal::empreinte(&hash1, &annulation),
+            "c053caafab2020ad226a7a27b481a1ce03d95f48bd9df4918ce1b554033b1d80"
+        );
+    }
+
+    #[test]
+    fn un_montant_qui_deborde_ou_un_recu_enorme_est_refuse_sans_rien_changer() {
+        let mut s = Stock::nouveau();
+        produit(&mut s, "Cher", 5, Some(MONTANT_MAX.0), Some(0));
+        produit(&mut s, "Pain", 5, Some(120), Some(550));
+        let avant = etat_de(&s);
+        assert_eq!(
+            s.encaisser(&demande(&[("Cher", 2)]), Moyen::Carte, Montant(0), QUAND)
+                .unwrap_err(),
+            ErreurStock::MontantTropGrand
+        );
+        assert_eq!(
+            s.encaisser(
+                &demande(&[("Pain", 1)]),
+                Moyen::Especes,
+                Montant(MONTANT_MAX.0 + 1),
+                QUAND
+            )
+            .unwrap_err(),
+            ErreurStock::MontantTropGrand
+        );
+        assert_eq!(etat_de(&s), avant);
+    }
+
+    #[test]
+    fn une_vente_gratuite_est_possible() {
+        let mut s = Stock::nouveau();
+        produit(&mut s, "Sac", 5, Some(0), Some(0));
+        let p = s
+            .encaisser(&demande(&[("Sac", 2)]), Moyen::Especes, Montant(0), QUAND)
+            .unwrap();
+        assert_eq!((p.total, p.rendu), (Montant(0), Montant(0)));
+        assert_eq!(quantite_de(&s, "Sac"), 3);
     }
 }

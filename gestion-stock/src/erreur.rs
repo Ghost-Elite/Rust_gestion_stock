@@ -29,6 +29,15 @@ pub enum ErreurStock {
     PanierVide,
     /// Ce produit n'a pas de prix : on ne peut pas le vendre.
     PrixManquant(String),
+    /// Espèces reçues insuffisantes ; les montants sont déjà écrits avec leur devise.
+    MontantInsuffisant {
+        du: String,
+        recu: String,
+    },
+    /// La pièce de ce numéro ne correspond plus à son empreinte dans le journal.
+    JournalAltere {
+        numero: u64,
+    },
 }
 
 impl fmt::Display for ErreurStock {
@@ -69,6 +78,14 @@ impl fmt::Display for ErreurStock {
                 write!(f, "Le montant dépasse la limite autorisée.")
             }
             ErreurStock::PanierVide => write!(f, "Le panier est vide."),
+            ErreurStock::MontantInsuffisant { du, recu } => write!(
+                f,
+                "Montant reçu insuffisant : {recu} reçu(s) pour {du} à payer."
+            ),
+            ErreurStock::JournalAltere { numero } => write!(
+                f,
+                "Le journal de caisse a été modifié : la pièce n° {numero} ne correspond plus à son empreinte."
+            ),
             ErreurStock::PrixManquant(nom) => write!(
                 f,
                 "Le produit « {nom} » n'a pas de prix : donnez-lui un prix avant de le vendre."

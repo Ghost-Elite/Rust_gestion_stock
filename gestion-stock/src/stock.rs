@@ -1,6 +1,7 @@
 use crate::erreur::ErreurStock;
 use crate::monnaie::{MONTANT_MAX, Montant};
 use crate::reglages::Reglages;
+use crate::vente::Piece;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Produit {
@@ -39,6 +40,7 @@ pub struct Stock {
     pub(crate) produits: Vec<Produit>,
     pub(crate) historique: Vec<Mouvement>,
     pub(crate) reglages: Reglages,
+    pub(crate) pieces: Vec<Piece>,
 }
 
 /// Retire les espaces autour du nom et refuse ce qui casserait le fichier de données.
