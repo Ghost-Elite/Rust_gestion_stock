@@ -14,6 +14,7 @@ use gestion_stock::reglages::{Profil, Reglages};
 use gestion_stock::stock::{Genre, Stock};
 use gestion_stock::stockage::{charger, sauvegarder};
 use gestion_stock::vente::{Devis, GenrePiece, GroupeTaux, Moyen, Piece, detail_taxes};
+use std::collections::HashSet;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
@@ -110,6 +111,43 @@ pub struct DetailTicket {
     /// Pour une vente en espèces seulement.
     pub recu: Option<String>,
     pub rendu: Option<String>,
+}
+
+/// Le statut d'une pièce parmi toutes celles du journal.
+fn statut_d_une_piece(piece: &Piece, pieces: &[Piece]) -> StatutPiece {
+    match piece.genre {
+        GenrePiece::Annulation { .. } => StatutPiece::Remboursement,
+        GenrePiece::Vente => {
+            let remboursee = pieces
+                .iter()
+                .any(|p| p.genre == GenrePiece::Annulation { de: piece.numero });
+            if remboursee {
+                StatutPiece::Remboursee
+            } else {
+                StatutPiece::Payee
+            }
+        }
+    }
+}
+
+/// Le statut de chaque pièce du journal, dans l'ordre de `pieces`, en un seul passage : on note
+/// d'abord quelles ventes ont été remboursées.
+fn statuts_des_pieces(pieces: &[Piece]) -> Vec<StatutPiece> {
+    let remboursees: HashSet<u64> = pieces
+        .iter()
+        .filter_map(|piece| match piece.genre {
+            GenrePiece::Annulation { de } => Some(de),
+            GenrePiece::Vente => None,
+        })
+        .collect();
+    pieces
+        .iter()
+        .map(|piece| match piece.genre {
+            GenrePiece::Annulation { .. } => StatutPiece::Remboursement,
+            GenrePiece::Vente if remboursees.contains(&piece.numero) => StatutPiece::Remboursee,
+            GenrePiece::Vente => StatutPiece::Payee,
+        })
+        .collect()
 }
 
 /// Les trois chiffres du haut de la fenêtre.
@@ -637,21 +675,7 @@ impl Etat {
     }
 
     fn statut_de(&self, piece: &Piece) -> StatutPiece {
-        match piece.genre {
-            GenrePiece::Annulation { .. } => StatutPiece::Remboursement,
-            GenrePiece::Vente => {
-                let annulee = self
-                    .stock
-                    .pieces()
-                    .iter()
-                    .any(|p| p.genre == GenrePiece::Annulation { de: piece.numero });
-                if annulee {
-                    StatutPiece::Remboursee
-                } else {
-                    StatutPiece::Payee
-                }
-            }
-        }
+        statut_d_une_piece(piece, self.stock.pieces())
     }
 
     /// Le ticket d'une pièce du journal, prêt à être affiché ; `None` si le numéro n'existe pas.
@@ -705,11 +729,13 @@ impl Etat {
     /// Tous les tickets du journal, du plus récent au plus ancien.
     pub fn historique_ventes(&self) -> Vec<LigneHistorique> {
         let devise = self.stock.reglages().devise;
-        self.stock
-            .pieces()
+        let pieces = self.stock.pieces();
+        let statuts = statuts_des_pieces(pieces);
+        pieces
             .iter()
+            .zip(statuts)
             .rev()
-            .map(|piece| {
+            .map(|(piece, statut)| {
                 let local = piece.horodatage.local();
                 LigneHistorique {
                     numero: piece.numero,
@@ -718,7 +744,7 @@ impl Etat {
                     heure: format!("{:02}:{:02}", local.heure, local.minute),
                     moyen: piece.moyen,
                     total: devise.formater(piece.total),
-                    statut: self.statut_de(piece),
+                    statut,
                     articles: piece.lignes.iter().map(|l| l.quantite).sum(),
                 }
             })
@@ -1610,5 +1636,42 @@ mod tests {
         assert_eq!(d.taxes, ["Taxe 8\u{a0}% : $0.19"]);
         assert_eq!(d.libelle_total, "Total");
         assert_eq!(d.total, "$2.59");
+    }
+
+    #[test]
+    fn les_statuts_des_pieces_se_calculent_en_un_seul_passage() {
+        // Des années de ventes : 30 000 tickets puis leurs 30 000 remboursements. Calculer le statut
+        // de chaque ticket en parcourant tout le journal gèlerait l'écran Historique, qui le
+        // recalcule à chaque image.
+        let n = 30_000u64;
+        let piece = |numero: u64, genre: GenrePiece| Piece {
+            numero,
+            genre,
+            horodatage: Horodatage {
+                utc: 0,
+                decalage_minutes: 0,
+            },
+            lignes: Vec::new(),
+            moyen: Moyen::Carte,
+            total: Montant(100),
+            recu: Montant(100),
+            rendu: Montant::ZERO,
+            hash_precedent: String::new(),
+            hash: String::new(),
+        };
+        let mut pieces: Vec<Piece> = (1..=n).map(|i| piece(i, GenrePiece::Vente)).collect();
+        pieces.extend((1..=n).map(|i| piece(n + i, GenrePiece::Annulation { de: i })));
+        pieces.push(piece(2 * n + 1, GenrePiece::Vente)); // une vente jamais remboursée
+        let debut = std::time::Instant::now();
+        let statuts = statuts_des_pieces(&pieces);
+        let duree = debut.elapsed();
+        assert!(
+            duree < std::time::Duration::from_millis(500),
+            "{} pièces : {duree:?}",
+            pieces.len()
+        );
+        assert_eq!(statuts[0], StatutPiece::Remboursee);
+        assert_eq!(statuts[n as usize], StatutPiece::Remboursement);
+        assert_eq!(statuts[(2 * n) as usize], StatutPiece::Payee);
     }
 }

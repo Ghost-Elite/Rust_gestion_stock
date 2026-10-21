@@ -537,4 +537,32 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn a_la_largeur_minimale_aucun_texte_ne_depasse_la_fenetre() {
+        // 640 points : la plus petite fenêtre. Aucun texte ne doit sortir à droite.
+        let taille = Vec2::new(TAILLE_MINIMALE[0], 2400.0);
+        for (nom, ecran) in [
+            ("vente", Ecran::Vente),
+            ("recherche", Ecran::Recherche),
+            ("historique", Ecran::Historique),
+            ("stock", Ecran::Stock),
+            ("reglages", Ecran::Reglages),
+        ] {
+            let mut app = app_avec_ventes(&format!("minimale-{nom}"));
+            app.ecran = ecran;
+            app.panier = vec![("Pain".to_string(), 2), ("Savon".to_string(), 1)];
+            app.ligne_choisie = Some("Pain".to_string());
+            let textes = textes_peints(&mut app, taille, 1.0);
+            assert!(textes.len() > 6, "{nom} : trop peu de textes");
+            for t in &textes {
+                assert!(
+                    t.rect.left() >= -0.5 && t.rect.right() <= taille.x - 8.0,
+                    "{nom} : « {} » dépasse : {:?}",
+                    t.texte,
+                    t.rect
+                );
+            }
+        }
+    }
 }

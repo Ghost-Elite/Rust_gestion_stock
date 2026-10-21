@@ -187,21 +187,23 @@ fn carte_liste(
                     bandeau_alerte(ui, &journal_altere(message));
                 });
             }
+            if vue.visibles.is_empty() {
+                let texte = if vue.aucune_vente {
+                    AUCUNE_VENTE
+                } else if app.historique.filtre.trim().is_empty() {
+                    AUCUNE_VENTE_JOUR
+                } else {
+                    AUCUN_TICKET
+                };
+                ui.add_space(32.0);
+                ui.vertical_centered(|ui| discret(ui, texte));
+            }
+            // Seules les lignes que l'on voit sont construites : un numéro tapé peut en retenir
+            // des milliers.
             ScrollArea::vertical()
                 .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    if vue.visibles.is_empty() {
-                        let texte = if vue.aucune_vente {
-                            AUCUNE_VENTE
-                        } else if app.historique.filtre.trim().is_empty() {
-                            AUCUNE_VENTE_JOUR
-                        } else {
-                            AUCUN_TICKET
-                        };
-                        ui.add_space(32.0);
-                        ui.vertical_centered(|ui| discret(ui, texte));
-                    }
-                    for ligne in &vue.visibles {
+                .show_rows(ui, HAUTEUR_LIGNE, vue.visibles.len(), |ui, plage| {
+                    for ligne in &vue.visibles[plage] {
                         let choisie = vue.courant == Some(ligne.numero);
                         if ligne_de_ticket(ui, ligne, choisie) {
                             action = Some(Action::Choisir(ligne.numero));
@@ -334,11 +336,18 @@ fn ligne_de_ticket(ui: &mut Ui, ligne: &LigneHistorique, choisie: bool) -> bool 
             .layout(Layout::left_to_right(Align::Center)),
     );
     enfant.spacing_mut().item_spacing.x = 12.0;
-    let flexible = (interieur.width() - 120.0 - 80.0 - 140.0 - 150.0 - 4.0 * 12.0).max(60.0);
+    // Dans une fenêtre étroite les colonnes fixes rétrécissent : sinon le statut sortirait de la carte.
+    let (l_ticket, l_heure, l_total, l_statut) = if interieur.width() < 640.0 {
+        (96.0, 64.0, 110.0, 120.0)
+    } else {
+        (120.0, 80.0, 140.0, 150.0)
+    };
+    let flexible =
+        (interieur.width() - l_ticket - l_heure - l_total - l_statut - 4.0 * 12.0).max(0.0);
     let ligne_de = Layout::left_to_right(Align::Center);
     zone(
         &mut enfant,
-        Vec2::new(120.0, HAUTEUR_LIGNE),
+        Vec2::new(l_ticket, HAUTEUR_LIGNE),
         ligne_de,
         |ui| {
             texte_de_colonne(ui, &ligne.ticket, 16.0, Graisse::SemiGrasse, TEXTE);
@@ -346,7 +355,7 @@ fn ligne_de_ticket(ui: &mut Ui, ligne: &LigneHistorique, choisie: bool) -> bool 
     );
     zone(
         &mut enfant,
-        Vec2::new(80.0, HAUTEUR_LIGNE),
+        Vec2::new(l_heure, HAUTEUR_LIGNE),
         ligne_de,
         |ui| {
             texte_de_colonne(ui, &ligne.heure, 16.0, Graisse::Normale, TEXTE_DISCRET);
@@ -369,7 +378,7 @@ fn ligne_de_ticket(ui: &mut Ui, ligne: &LigneHistorique, choisie: bool) -> bool 
     let a_droite = Layout::right_to_left(Align::Center);
     zone(
         &mut enfant,
-        Vec2::new(140.0, HAUTEUR_LIGNE),
+        Vec2::new(l_total, HAUTEUR_LIGNE),
         a_droite,
         |ui| {
             texte_de_colonne(ui, &ligne.total, 16.0, Graisse::SemiGrasse, TEXTE);
@@ -377,7 +386,7 @@ fn ligne_de_ticket(ui: &mut Ui, ligne: &LigneHistorique, choisie: bool) -> bool 
     );
     zone(
         &mut enfant,
-        Vec2::new(150.0, HAUTEUR_LIGNE),
+        Vec2::new(l_statut, HAUTEUR_LIGNE),
         a_droite,
         |ui| {
             texte_de_colonne(
@@ -941,6 +950,46 @@ mod tests {
         ] {
             let rect = h.get_by_role_and_label(Role::Button, &nom).rect();
             assert!(ecran.contains_rect(rect), "« {nom} » : {rect:?}");
+        }
+    }
+
+    #[test]
+    fn seules_les_lignes_visibles_sont_construites_meme_avec_des_centaines_de_tickets() {
+        // Des mois de ventes : taper « 0 » dans « N° de ticket » en retient presque tous. Construire
+        // chaque ligne à chaque image gèlerait l'écran.
+        let (mut etat, _) = etat_sur_deux_jours("beaucoup-de-tickets");
+        assert!(etat.entree("Pain", "500"));
+        for _ in 0..250 {
+            assert!(etat.encaisser(&[("Pain".to_string(), 1)], Moyen::Carte, ""));
+        }
+        let mut app = Application::nouvelle(etat);
+        app.ecran = Ecran::Historique;
+        app.historique.filtre = "0".to_string();
+        let h = harness_vente(app, FENETRE);
+        let lignes = h.get_all_by_label_contains("Ticket 01-").count();
+        assert!(
+            (1..=40).contains(&lignes),
+            "{lignes} lignes construites pour 250 tickets"
+        );
+    }
+
+    #[test]
+    fn a_la_largeur_minimale_l_historique_ne_coupe_aucun_texte() {
+        let mut app = app_avec_ventes("largeur-minimale");
+        app.ecran = Ecran::Historique;
+        let taille = eframe::egui::Vec2::new(TAILLE_MINIMALE[0], 1200.0);
+        let textes = textes_peints(&mut app, taille, 1.0);
+        for attendu in [STATUT_PAYEE, "2,50\u{a0}€", "01-0002"] {
+            let t = textes
+                .iter()
+                .find(|t| t.texte == attendu)
+                .unwrap_or_else(|| panic!("« {attendu} » n'est pas peint"));
+            // Le bord droit de la carte de liste est à 16 points du bord de la fenêtre.
+            assert!(
+                t.rect.right() <= taille.x - 16.0 - 8.0 && t.rect.left() >= 16.0,
+                "« {attendu} » déborde de la carte : {:?}",
+                t.rect
+            );
         }
     }
 }
