@@ -425,3 +425,20 @@ fn apercu_kora_recherche() {
 fn apercu_kora_historique() {
     capturer("kora_historique", ECRAN, kora_historique());
 }
+
+#[test]
+#[ignore = "outil de design : lancer à la main"]
+fn apercu_kora_sans_article() {
+    // Le cas d'un fichier tout juste créé : des produits, mais ni prix ni stock.
+    let chemin = std::env::temp_dir().join(format!(
+        "gestion-stock-gui-kora-{}-sans-article.txt",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_file(&chemin);
+    let mut etat = Etat::ouvrir(chemin).unwrap();
+    for produit in ["Lait", "Riz parfumé 5kg", "Café moulu 250g"] {
+        assert!(etat.ajouter(produit, "2"));
+    }
+    etat.retour = None;
+    capturer("kora_sans_article", ECRAN, Application::nouvelle(etat));
+}

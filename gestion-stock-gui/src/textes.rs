@@ -52,6 +52,11 @@ pub fn ajouter_article(nom: &str) -> String {
 pub const CHAMP_SCAN: &str = "Scannez un article ou tapez son nom";
 pub const TICKET_VIDE_TITRE: &str = "Prêt pour une nouvelle vente";
 pub const TICKET_VIDE_AIDE: &str = "Scannez le premier article pour commencer.";
+pub const TICKET_VIDE_SANS_ARTICLE: &str =
+    "Aucun article n'est prêt à la vente : il faut un prix et du stock.";
+pub const BOUTON_SIMULER_SCAN: &str = "Simuler un scan";
+pub const BOUTON_CHARGER_EXEMPLE: &str = "Charger les articles d'exemple";
+pub const TOAST_RIEN_A_SCANNER: &str = "Aucun article à scanner : donnez un prix et du stock à vos produits (écran Stock), ou chargez les articles d'exemple.";
 pub const LIBELLE_TOTAL_GRAND: &str = "TOTAL";
 pub const BOUTON_ESPECES: &str = "Espèces";
 pub const BOUTON_CARTE: &str = "Carte";
@@ -107,12 +112,12 @@ pub const BOUTON_VALIDER: &str = "Valider";
 pub const CARTE_TITRE: &str = "Paiement par carte";
 pub const AUTRE_TITRE: &str = "Autre moyen de paiement";
 pub const CARTE_ATTENTE: &str = "Présentez la carte sur le terminal";
-pub const CARTE_AIDE: &str = "Sans contact, puce ou piste. Saisissez le montant sur le terminal, puis confirmez ici ce qu'il affiche.";
+pub const CARTE_AIDE: &str = "Sans contact, puce ou piste. Le montant est déjà envoyé au terminal.";
 pub const AUTRE_ATTENTE: &str = "Le client règle autrement (mobile money, chèque, virement…).";
 pub const AUTRE_AIDE: &str = "Confirmez ici quand le paiement est reçu.";
-pub const BOUTON_ACCEPTE: &str = "Paiement accepté";
-pub const BOUTON_REFUSE: &str = "Paiement refusé";
-pub const BOUTON_RECU: &str = "Paiement reçu";
+pub const BOUTON_ACCEPTE: &str = "Simuler : acceptée";
+pub const BOUTON_REFUSE: &str = "Simuler : refusée";
+pub const BOUTON_RECU: &str = "Simuler : paiement accepté";
 pub const CARTE_REFUSEE: &str = "Carte refusée";
 pub const CARTE_REFUSEE_AIDE: &str =
     "Aucun montant n'a été débité. Proposez un autre moyen de paiement.";
@@ -354,6 +359,31 @@ pub fn pied_de_page_donnees(chemin: &str) -> String {
 
 pub fn ajouter_au_panier(nom: &str, prix: &str) -> String {
     format!("Ajouter {nom} au panier ({prix})")
+}
+
+pub const EXEMPLE_APRES_VENTE: &str = "Des ventes sont déjà enregistrées : les articles d'exemple (en FCFA) ne se chargent que dans une caisse sans vente.";
+pub const EXEMPLE_DEJA_LA: &str = "Les articles d'exemple sont déjà dans le stock.";
+
+/// `15 articles d'exemple ajoutés (prix en FCFA, TVA 18 % incluse).`
+pub fn exemple_charges(ajoutes: usize) -> String {
+    match ajoutes {
+        0 => EXEMPLE_DEJA_LA.to_string(),
+        1 => "1 article d'exemple ajouté (prix en FCFA, TVA 18\u{a0}% incluse).".to_string(),
+        n => format!("{n} articles d'exemple ajoutés (prix en FCFA, TVA 18\u{a0}% incluse)."),
+    }
+}
+
+/// À ajouter au message quand des produits avaient déjà un prix dans une autre devise.
+pub fn exemple_attention_prix(nombre: usize) -> String {
+    let (sujet, verbe) = if nombre == 1 {
+        ("1 produit déjà tarifé garde", "son prix chiffré")
+    } else {
+        ("{n} produits déjà tarifés gardent", "leur prix chiffré")
+    };
+    format!(
+        "Attention : {} {verbe}, désormais en FCFA : vérifiez-le dans l'écran Stock.",
+        sujet.replace("{n}", &nombre.to_string())
+    )
 }
 
 pub fn produit_non_vendable(nom: &str, raison: &str) -> String {

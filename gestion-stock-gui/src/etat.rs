@@ -6,7 +6,10 @@
 
 use crate::catalogue::{CATALOGUE, Suggestion, normaliser, suggerer};
 use crate::horloge;
-use crate::textes::{libelle_taxe, libelle_total, numero_de_ticket};
+use crate::textes::{
+    EXEMPLE_APRES_VENTE, exemple_attention_prix, exemple_charges, libelle_taxe, libelle_total,
+    numero_de_ticket,
+};
 use gestion_stock::erreur::ErreurStock;
 use gestion_stock::horodatage::Horodatage;
 use gestion_stock::monnaie::{Devise, Montant, lire_taux};
@@ -541,6 +544,57 @@ impl Etat {
     /// Un montant écrit avec la devise des réglages.
     pub fn formater(&self, montant: Montant) -> String {
         self.stock.reglages().devise.formater(montant)
+    }
+
+    /// Vrai si rien ne peut être mis au ticket : aucun produit n'a à la fois un prix et du stock.
+    pub fn aucun_article_vendable(&self) -> bool {
+        self.stock
+            .produits()
+            .iter()
+            .all(|p| p.prix.is_none() || p.quantite == 0)
+    }
+
+    /// Ajoute les articles d'exemple de la maquette (voir `exemple`) et passe les réglages en FCFA,
+    /// TVA 18 % incluse. Un produit qui porte déjà ce nom est laissé tel quel. Refusé dès qu'une
+    /// vente existe (les montants du journal sont figés dans leur devise). Les produits déjà
+    /// tarifés dans une autre devise gardent leur prix chiffré : le message le signale.
+    pub fn charger_exemple(&mut self) -> bool {
+        self.appliquer(|stock| {
+            if !stock.pieces().is_empty() {
+                return Err(ErreurStock::Utilisation(EXEMPLE_APRES_VENTE.to_string()));
+            }
+            // Les produits déjà tarifés gardent leur prix chiffré : en passant en FCFA, leur montant
+            // change de sens. On les compte pour le dire.
+            let deja_tarifes = if stock.reglages().devise == Devise::Xof {
+                0
+            } else {
+                stock.produits().iter().filter(|p| p.prix.is_some()).count()
+            };
+            stock.definir_reglages(Reglages {
+                profil: Profil::Europe,
+                devise: Devise::Xof,
+                taux_defaut_bp: crate::exemple::TAUX_EXEMPLE_BP,
+            })?;
+            let mut ajoutes = 0;
+            for (nom, prix, quantite) in crate::exemple::ARTICLES_EXEMPLE {
+                match stock.ajouter_produit(nom, crate::exemple::SEUIL_EXEMPLE) {
+                    Ok(()) => {}
+                    Err(ErreurStock::ProduitExistant(_)) => continue,
+                    Err(e) => return Err(e),
+                }
+                stock.definir_prix(nom, Some(Montant(prix)), None)?;
+                if quantite > 0 {
+                    stock.enregistrer_entree(nom, quantite)?;
+                }
+                ajoutes += 1;
+            }
+            let mut message = exemple_charges(ajoutes);
+            if deja_tarifes > 0 {
+                message.push(' ');
+                message.push_str(&exemple_attention_prix(deja_tarifes));
+            }
+            Ok(message)
+        })
     }
 
     pub fn definir_reglages(&mut self, profil: Profil, devise: Devise, taux: &str) -> bool {
@@ -1148,6 +1202,87 @@ mod tests {
             .into_iter()
             .find(|l| l.nom == nom)
             .unwrap()
+    }
+
+    // ---- Les articles d'exemple ---------------------------------------------------------------
+
+    #[test]
+    fn charger_les_articles_d_exemple_donne_des_produits_vendables_en_fcfa() {
+        let chemin = chemin_temp("exemple");
+        let mut e = Etat::ouvrir(chemin.clone()).unwrap();
+        assert!(
+            e.aucun_article_vendable(),
+            "un stock vide n'a rien à vendre"
+        );
+        assert!(e.charger_exemple());
+        let r = e.reglages();
+        assert_eq!(
+            (r.profil, r.devise, r.taux_defaut_bp),
+            (Profil::Europe, Devise::Xof, 1800)
+        );
+        let lignes = e.lignes("", false);
+        assert_eq!(lignes.len(), crate::exemple::ARTICLES_EXEMPLE.len());
+        assert!(lignes.iter().all(|l| l.prix.is_some()));
+        assert!(!e.aucun_article_vendable());
+        let Some(Retour::Succes(message)) = &e.retour else {
+            panic!("{:?}", e.retour);
+        };
+        assert!(
+            message.contains("15 articles d'exemple") && message.contains("FCFA"),
+            "{message}"
+        );
+        // Tout est enregistré dans le fichier.
+        let rouvert = Etat::ouvrir(chemin).unwrap();
+        assert_eq!(rouvert.lignes("", false).len(), lignes.len());
+        assert_eq!(rouvert.reglages(), r);
+    }
+
+    #[test]
+    fn charger_deux_fois_n_ajoute_rien_et_garde_les_produits_existants() {
+        let mut e = Etat::ouvrir(chemin_temp("exemple-deux-fois")).unwrap();
+        assert!(e.ajouter("Lait", "2")); // un produit à soi, sans prix
+        assert!(e.charger_exemple());
+        let total = e.lignes("", false).len();
+        assert_eq!(total, crate::exemple::ARTICLES_EXEMPLE.len() + 1);
+        assert_eq!(
+            ligne(&e, "Lait").prix,
+            None,
+            "le produit existant n'est pas touché"
+        );
+        assert!(e.charger_exemple());
+        assert_eq!(e.lignes("", false).len(), total);
+        let Some(Retour::Succes(message)) = &e.retour else {
+            panic!("{:?}", e.retour);
+        };
+        assert!(message.contains("déjà"), "{message}");
+    }
+
+    #[test]
+    fn un_produit_deja_tarife_dans_une_autre_devise_garde_son_prix_et_on_le_signale() {
+        let mut e = Etat::ouvrir(chemin_temp("exemple-prix-existant")).unwrap();
+        assert!(e.ajouter_avec_prix("Pâtes", "0", "1000", "")); // 1 000,00 € (prix en centimes)
+        assert!(e.charger_exemple());
+        assert_eq!(ligne(&e, "Pâtes").prix, Some(Montant(100_000)));
+        let Some(Retour::Succes(message)) = &e.retour else {
+            panic!("{:?}", e.retour);
+        };
+        assert!(
+            message.contains("Attention") && message.contains("1 produit"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn les_articles_d_exemple_ne_se_chargent_pas_apres_une_vente() {
+        let mut e = etat_vendeur("exemple-apres-vente");
+        assert!(e.encaisser(&panier(&[("Pain", 1)]), Moyen::Carte, ""));
+        let avant = e.lignes("", false).len();
+        assert!(!e.charger_exemple());
+        assert_eq!(e.lignes("", false).len(), avant);
+        let Some(Retour::Erreur(message)) = &e.retour else {
+            panic!("{:?}", e.retour);
+        };
+        assert!(message.contains("ventes"), "{message}");
     }
 
     #[test]

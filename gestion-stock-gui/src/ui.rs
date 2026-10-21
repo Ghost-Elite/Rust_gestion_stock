@@ -149,6 +149,9 @@ pub struct Application {
     /// Ce que le client a donné, tel que tapé (pour un paiement en espèces).
     pub saisie_recu: String,
     pub recherche_vente: String,
+    /// Le prochain article que « Simuler un scan » essaiera d'ajouter (indice dans la liste
+    /// triée des produits).
+    pub rotation_scan: usize,
     /// L'historique des tickets : filtre, jour affiché, ticket choisi.
     pub historique: EtatHistorique,
     /// `None` : on montre les réglages enregistrés.

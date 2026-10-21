@@ -146,6 +146,18 @@ pub(crate) fn app_vendeuse(nom: &str) -> Application {
     Application::nouvelle(etat_vendeur(nom))
 }
 
+/// Un stock où rien ne se vend : des produits sans prix ou sans stock (le cas d'un fichier tout
+/// juste créé).
+pub(crate) fn app_sans_article_vendable(nom: &str) -> Application {
+    let mut etat = Etat::ouvrir(chemin_temp(nom))
+        .unwrap()
+        .avec_horloge(|| FIXE);
+    assert!(etat.ajouter("Thé", "0"));
+    assert!(etat.ajouter_avec_prix("Sel", "0", "0,80", "")); // un prix, mais stock à 0
+    etat.retour = None;
+    Application::nouvelle(etat)
+}
+
 /// La même, avec un produit épuisé (« Sel ») et un produit sans prix (« Thé »).
 pub(crate) fn app_vendeuse_avec_blocages(nom: &str) -> Application {
     let mut etat = etat_vendeur(nom);

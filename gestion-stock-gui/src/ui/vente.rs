@@ -14,7 +14,7 @@ use super::{
 use crate::palette::{
     ACCENT, ACCENT_DOUX, ACCENT_TEXTE, ALERTE_BORD, ALERTE_TEXTE, BORDURE_BOUTON, FILET,
     FILET_LIGNE, FOND, FOND_DOUX, GRISE_FOND, GRISE_TEXTE, SURFACE, TEXTE, TEXTE_DISCRET,
-    TEXTE_SECONDAIRE, couleur,
+    TEXTE_SECONDAIRE, TEXTE_SIMULATION, couleur,
 };
 use crate::police::{Graisse, police_disponible};
 use crate::scan::{ResultatScan, analyser, texte_recherche};
@@ -85,6 +85,33 @@ pub(super) fn ajouter_au_ticket(app: &mut Application, nom: &str, quantite: u32)
     app.ajouter_au_panier(nom, quantite);
     app.ligne_choisie = Some(nom.to_string());
     true
+}
+
+/// « Simuler un scan » : à défaut de lecteur de codes-barres, met au ticket l'article vendable
+/// suivant (par ordre alphabétique, en repartant du début après le dernier). Les articles sans
+/// prix, épuisés, ou dont tout le stock est déjà au ticket sont sautés ; s'il n'y en a aucun, un
+/// message le dit et rien ne change.
+fn simuler_un_scan(app: &mut Application) {
+    let Some(etat) = app.etat.as_ref() else {
+        return;
+    };
+    let produits = etat.lignes("", false);
+    let nombre = produits.len();
+    for decalage in 0..nombre {
+        let i = (app.rotation_scan + decalage) % nombre;
+        let produit = &produits[i];
+        let au_ticket = app
+            .panier
+            .iter()
+            .find(|(nom, _)| *nom == produit.nom)
+            .map_or(0, |(_, quantite)| *quantite);
+        if produit.prix.is_some() && produit.quantite > au_ticket {
+            app.rotation_scan = i + 1;
+            ajouter_au_ticket(app, &produit.nom, 1);
+            return;
+        }
+    }
+    app.message(TOAST_RIEN_A_SCANNER);
 }
 
 /// Valide ce qui est tapé dans le champ de scan.
@@ -237,13 +264,20 @@ fn carte_ticket(ui: &mut Ui, app: &mut Application, devis: &DevisTicket, hauteur
 /// Le champ de scan : un lecteur de codes-barres tape le code puis Entrée, comme une personne qui
 /// tape un nom. Il garde le focus : au démarrage et après chaque action.
 fn champ_de_scan(ui: &mut Ui, app: &mut Application) {
-    let zone = Frame::new()
+    let mut simuler = false;
+    let zone_du_champ = Frame::new()
         .inner_margin(Margin::same(14))
         .show(ui, |ui| {
             Frame::new()
                 .stroke(Stroke::new(2.0, couleur(ACCENT)))
                 .corner_radius(CornerRadius::same(10))
-                .inner_margin(Margin::symmetric(16, 0))
+                // 16 à gauche, 8 à droite : le bouton « Simuler un scan » est tout contre le bord.
+                .inner_margin(Margin {
+                    left: 16,
+                    right: 8,
+                    top: 0,
+                    bottom: 0,
+                })
                 .show(ui, |ui| {
                     zone(
                         ui,
@@ -252,6 +286,18 @@ fn champ_de_scan(ui: &mut Ui, app: &mut Application) {
                         |ui| {
                             ui.spacing_mut().item_spacing.x = 10.0;
                             icone_code_barres(ui);
+                            let police_bouton =
+                                police_disponible(ui.ctx(), Graisse::SemiGrasse, 14.0);
+                            let largeur_bouton = ui
+                                .painter()
+                                .layout_no_wrap(
+                                    BOUTON_SIMULER_SCAN.to_string(),
+                                    police_bouton,
+                                    couleur(TEXTE_SIMULATION),
+                                )
+                                .size()
+                                .x
+                                + 28.0;
                             let champ = TextEdit::singleline(&mut app.scan)
                                 .hint_text(
                                     RichText::new(CHAMP_SCAN)
@@ -260,7 +306,9 @@ fn champ_de_scan(ui: &mut Ui, app: &mut Application) {
                                 )
                                 .font(FontId::proportional(18.0))
                                 .frame(Frame::NONE)
-                                .desired_width(f32::INFINITY);
+                                .desired_width(
+                                    (ui.available_width() - largeur_bouton - 10.0).max(40.0),
+                                );
                             let reponse = ui.add(champ);
                             // egui n'utilise pas le texte d'invite comme nom : on le donne.
                             ui.ctx().accesskit_node_builder(reponse.id, |noeud| {
@@ -274,15 +322,35 @@ fn champ_de_scan(ui: &mut Ui, app: &mut Application) {
                                 valider_scan(app);
                                 app.focus_scan = true;
                             }
+                            simuler = bouton_a_lignes(
+                                ui,
+                                BOUTON_SIMULER_SCAN,
+                                Vec2::new(largeur_bouton, 40.0),
+                                FILET_LIGNE,
+                                Stroke::NONE,
+                                8,
+                                &[LigneBouton {
+                                    texte: BOUTON_SIMULER_SCAN,
+                                    taille: 14.0,
+                                    graisse: Graisse::SemiGrasse,
+                                    couleur: TEXTE_SIMULATION,
+                                }],
+                                true,
+                            )
+                            .clicked();
                         },
                     );
                 });
         })
         .response
         .rect;
+    if simuler {
+        simuler_un_scan(app);
+        app.focus_scan = true;
+    }
     ui.painter().hline(
-        zone.x_range(),
-        zone.bottom(),
+        zone_du_champ.x_range(),
+        zone_du_champ.bottom(),
         Stroke::new(1.0, couleur(FILET)),
     );
 }
@@ -315,7 +383,15 @@ enum ActionLigne {
 
 fn lignes_du_ticket(ui: &mut Ui, app: &mut Application, devis: &DevisTicket) {
     if app.panier.is_empty() {
-        ticket_vide(ui);
+        let sans_article = app
+            .etat
+            .as_ref()
+            .is_some_and(|etat| etat.aucun_article_vendable());
+        if ticket_vide(ui, sans_article)
+            && let Some(etat) = app.etat.as_mut()
+        {
+            etat.charger_exemple();
+        }
         return;
     }
     if let Some(Err(erreur)) = devis {
@@ -357,7 +433,10 @@ fn lignes_du_ticket(ui: &mut Ui, app: &mut Application, devis: &DevisTicket) {
     }
 }
 
-fn ticket_vide(ui: &mut Ui) {
+/// L'écran d'un ticket vide. Sans aucun article vendable, il dit pourquoi et propose de charger
+/// les articles d'exemple ; renvoie vrai si on vient de cliquer ce bouton.
+fn ticket_vide(ui: &mut Ui, sans_article_vendable: bool) -> bool {
+    let mut charger = false;
     ui.vertical_centered(|ui| {
         ui.spacing_mut().item_spacing.y = 8.0;
         ui.add_space((ui.available_height() / 2.0 - 40.0).max(20.0));
@@ -366,12 +445,25 @@ fn ticket_vide(ui: &mut Ui) {
                 .font(police_disponible(ui.ctx(), Graisse::SemiGrasse, 22.0))
                 .color(couleur(TEXTE)),
         );
-        ui.label(
-            RichText::new(TICKET_VIDE_AIDE)
-                .size(16.0)
-                .color(couleur(TEXTE_DISCRET)),
-        );
+        let aide = if sans_article_vendable {
+            TICKET_VIDE_SANS_ARTICLE
+        } else {
+            TICKET_VIDE_AIDE
+        };
+        ui.label(RichText::new(aide).size(16.0).color(couleur(TEXTE_DISCRET)));
+        if sans_article_vendable {
+            ui.add_space(8.0);
+            charger = bouton_large(
+                ui,
+                BOUTON_CHARGER_EXEMPLE,
+                Style::Secondaire,
+                true,
+                Vec2::new(320.0, 48.0),
+            )
+            .clicked();
+        }
     });
+    charger
 }
 
 /// Une ligne du ticket : repère, nom et détail, (si elle est choisie) « − » quantité « + », et
@@ -1146,6 +1238,94 @@ mod tests {
         let h = harness_vente(app, FENETRE);
         assert!(est_grise(&h, &ajouter_une_unite("Savon")));
         assert!(!est_grise(&h, &retirer_une_unite("Savon")));
+    }
+
+    // ---- La simulation du scan et le stock d'exemple ------------------------------------------
+
+    fn panier_de(h: &Harness<'static, Application>) -> Vec<(String, u32)> {
+        h.state().panier.clone()
+    }
+
+    #[test]
+    fn simuler_un_scan_ajoute_un_article_puis_le_suivant_et_recommence() {
+        let mut h = harness_vente(app_vendeuse("simul-scan"), FENETRE);
+        cliquer(&mut h, BOUTON_SIMULER_SCAN);
+        assert_eq!(panier_de(&h), [("Lait".to_string(), 1)]);
+        assert_eq!(h.state().ligne_choisie.as_deref(), Some("Lait"));
+        cliquer(&mut h, BOUTON_SIMULER_SCAN);
+        cliquer(&mut h, BOUTON_SIMULER_SCAN);
+        assert_eq!(
+            panier_de(&h),
+            [
+                ("Lait".to_string(), 1),
+                ("Pain".to_string(), 1),
+                ("Savon".to_string(), 1)
+            ]
+        );
+        cliquer(&mut h, BOUTON_SIMULER_SCAN);
+        assert_eq!(
+            panier_de(&h)[0],
+            ("Lait".to_string(), 2),
+            "on repart du premier"
+        );
+        // Les paiements sont maintenant possibles.
+        assert!(!est_grise(&h, BOUTON_ESPECES));
+    }
+
+    #[test]
+    fn simuler_un_scan_saute_les_articles_dont_tout_le_stock_est_au_ticket() {
+        let mut app = app_vendeuse("simul-scan-saute");
+        app.panier = vec![("Lait".to_string(), 10)]; // tout le Lait (10) est déjà au ticket
+        let mut h = harness_vente(app, FENETRE);
+        cliquer(&mut h, BOUTON_SIMULER_SCAN);
+        assert_eq!(
+            panier_de(&h),
+            [("Lait".to_string(), 10), ("Pain".to_string(), 1)]
+        );
+    }
+
+    #[test]
+    fn simuler_un_scan_sans_article_vendable_le_dit_et_ne_change_rien() {
+        let mut h = harness_vente(app_sans_article_vendable("simul-scan-vide"), FENETRE);
+        cliquer(&mut h, BOUTON_SIMULER_SCAN);
+        assert!(panier_de(&h).is_empty());
+        let message = h
+            .state()
+            .toast
+            .as_ref()
+            .map(|t| t.texte.clone())
+            .unwrap_or_default();
+        assert_eq!(message, TOAST_RIEN_A_SCANNER);
+    }
+
+    #[test]
+    fn un_stock_sans_article_vendable_propose_les_articles_d_exemple() {
+        let mut h = harness_vente(app_sans_article_vendable("exemple-ecran"), FENETRE);
+        h.get_by_label(TICKET_VIDE_SANS_ARTICLE);
+        assert!(h.query_by_label(TICKET_VIDE_AIDE).is_none());
+        cliquer(&mut h, BOUTON_CHARGER_EXEMPLE);
+        assert!(!h.state().etat.as_ref().unwrap().aucun_article_vendable());
+        h.get_by_label(TICKET_VIDE_AIDE);
+        assert!(
+            h.query_by_role_and_label(Role::Button, BOUTON_CHARGER_EXEMPLE)
+                .is_none()
+        );
+        // On peut alors vendre : un scan simulé, puis un paiement par carte.
+        cliquer(&mut h, BOUTON_SIMULER_SCAN);
+        assert_eq!(h.state().panier.len(), 1);
+        cliquer(&mut h, BOUTON_CARTE);
+        cliquer(&mut h, BOUTON_ACCEPTE);
+        assert_eq!(nombre_de_pieces(&h), 1);
+    }
+
+    #[test]
+    fn avec_des_articles_vendables_on_ne_propose_pas_les_articles_d_exemple() {
+        let h = harness_vente(app_vendeuse("sans-exemple"), FENETRE);
+        h.get_by_label(TICKET_VIDE_AIDE);
+        assert!(
+            h.query_by_role_and_label(Role::Button, BOUTON_CHARGER_EXEMPLE)
+                .is_none()
+        );
     }
 
     #[test]

@@ -36,6 +36,10 @@ pub const BORDURE_BOUTON: Rgb = [213, 218, 224];
 pub const FILET: Rgb = [225, 228, 232];
 /// Le filet entre deux lignes d'une liste.
 pub const FILET_LIGNE: Rgb = [238, 240, 243];
+/// Les boutons de SIMULATION (scan, paiement) : texte gris foncé sur fond gris clair ou blanc, et
+/// contour en pointillés (décoratif : le texte dit tout).
+pub const TEXTE_SIMULATION: Rgb = [63, 70, 80];
+pub const BORDURE_POINTILLEE: Rgb = [174, 181, 191];
 
 // ---- L'en-tête sombre -----------------------------------------------------------------------
 pub const ENTETE_FOND: Rgb = [22, 25, 29];
@@ -236,6 +240,8 @@ mod tests {
             ("bouton pressé", BOUTON_TEXTE, BOUTON_ACTIF_FOND),
             ("accent/carte", ACCENT, SURFACE),
             ("accent/sélection", ACCENT, ACCENT_DOUX),
+            ("simulation/blanc", TEXTE_SIMULATION, SURFACE),
+            ("simulation/gris clair", TEXTE_SIMULATION, FILET_LIGNE),
             ("bouton principal", ACCENT_TEXTE, ACCENT),
             ("bouton principal survolé", ACCENT_TEXTE, ACCENT_SURVOL),
             ("bouton de suppression", ACCENT_TEXTE, DANGER),

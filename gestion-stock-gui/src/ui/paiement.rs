@@ -6,8 +6,8 @@
 //! celles de `maquette/2-especes.html` et `3-carte.html`.
 
 use super::composants::{
-    LigneBouton, Style, bandeau_alerte, bouton_a_lignes, bouton_large, discret, libelle_et_valeur,
-    modale, modale_centree, zone,
+    LigneBouton, Style, bandeau_alerte, bouton_a_lignes, bouton_large, bouton_pointille, discret,
+    libelle_et_valeur, modale, modale_centree, zone,
 };
 use super::ticket::corps_du_ticket;
 use super::{Application, Modale};
@@ -412,32 +412,17 @@ pub(super) fn fenetre_terminal(ctx: &Context, app: &mut Application, moyen: Moye
                     }
                 });
             } else if moyen == Moyen::Carte {
+                // Pas de terminal relié : le paiement se simule (boutons en pointillés).
                 ui.columns(2, |colonnes| {
-                    let moitie = Vec2::new(colonnes[0].available_width(), 56.0);
-                    if bouton_large(
-                        &mut colonnes[0],
-                        BOUTON_ACCEPTE,
-                        Style::Principal,
-                        true,
-                        moitie,
-                    )
-                    .clicked()
-                    {
+                    let moitie = Vec2::new(colonnes[0].available_width(), 48.0);
+                    if bouton_pointille(&mut colonnes[0], BOUTON_ACCEPTE, moitie, 14.0).clicked() {
                         action = Some(ActionTerminal::Accepte);
                     }
-                    if bouton_large(
-                        &mut colonnes[1],
-                        BOUTON_REFUSE,
-                        Style::Secondaire,
-                        true,
-                        moitie,
-                    )
-                    .clicked()
-                    {
+                    if bouton_pointille(&mut colonnes[1], BOUTON_REFUSE, moitie, 14.0).clicked() {
                         action = Some(ActionTerminal::Refuse);
                     }
                 });
-            } else if bouton_large(ui, BOUTON_RECU, Style::Principal, true, grand).clicked() {
+            } else if bouton_pointille(ui, BOUTON_RECU, Vec2::new(largeur, 56.0), 15.0).clicked() {
                 action = Some(ActionTerminal::Accepte);
             }
             if !refuse && bouton_large(ui, BOUTON_ANNULER, Style::Secondaire, true, grand).clicked()
@@ -715,6 +700,33 @@ mod tests {
             (total.height() - 44.0 * 1.3).abs() < 0.5,
             "total de {} de haut",
             total.height()
+        );
+    }
+
+    /// `maquette/3-carte.html` : il n'y a pas de terminal relié, le paiement se SIMULE avec deux
+    /// boutons en pointillés.
+    #[test]
+    fn la_carte_et_l_autre_moyen_se_simulent_comme_dans_la_maquette() {
+        let mut app = a_payer("simule-carte");
+        app.modale = Some(Modale::Terminal {
+            moyen: Moyen::Carte,
+            refuse: false,
+        });
+        let h = harness_vente(app, FENETRE);
+        h.get_by_role_and_label(Role::Button, "Simuler : acceptée");
+        h.get_by_role_and_label(Role::Button, "Simuler : refusée");
+        h.get_by_label("Sans contact, puce ou piste. Le montant est déjà envoyé au terminal.");
+
+        let mut app = a_payer("simule-autre");
+        app.modale = Some(Modale::Terminal {
+            moyen: Moyen::Autre,
+            refuse: false,
+        });
+        let h = harness_vente(app, FENETRE);
+        h.get_by_role_and_label(Role::Button, "Simuler : paiement accepté");
+        assert!(
+            h.query_by_role_and_label(Role::Button, "Simuler : refusée")
+                .is_none()
         );
     }
 

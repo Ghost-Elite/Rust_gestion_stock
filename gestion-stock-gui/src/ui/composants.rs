@@ -2,15 +2,16 @@
 //! Les couleurs viennent de `palette`, où leur contraste est vérifié par des tests.
 
 use crate::palette::{
-    ACCENT, ACCENT_TEXTE, ALERTE_FOND, ALERTE_TEXTE, BORDURE_BOUTON, DANGER, FILET, FOCUS,
-    FOND_DOUX, GRISE_FOND, GRISE_TEXTE, Rgb, SURFACE, TEXTE, TEXTE_DISCRET, VOILE, couleur,
+    ACCENT, ACCENT_TEXTE, ALERTE_FOND, ALERTE_TEXTE, BORDURE_BOUTON, BORDURE_POINTILLEE, DANGER,
+    FILET, FOCUS, FOND_DOUX, GRISE_FOND, GRISE_TEXTE, Rgb, SURFACE, TEXTE, TEXTE_DISCRET,
+    TEXTE_SIMULATION, VOILE, couleur,
 };
 use crate::police::{Graisse, famille_disponible, police_disponible};
 use eframe::egui::accesskit::Role;
 use eframe::egui::{
     self, Align, Button, Color32, Context, CornerRadius, CursorIcon, FontId, Frame, Id, Label,
-    Layout, Margin, Pos2, Response, RichText, Sense, Stroke, StrokeKind, TextEdit, Ui, UiBuilder,
-    Vec2, WidgetInfo, WidgetType,
+    Layout, Margin, Pos2, Response, RichText, Sense, Shape, Stroke, StrokeKind, TextEdit, Ui,
+    UiBuilder, Vec2, WidgetInfo, WidgetType,
 };
 
 // ---- Petits éléments de style -----------------------------------------------------------------
@@ -378,6 +379,75 @@ pub(crate) fn bouton_a_lignes(
     } else {
         reponse
     }
+}
+
+/// Le contour d'un rectangle aux coins arrondis, en points (pour le tracer en pointillés).
+fn contour_arrondi(rect: egui::Rect, rayon: f32) -> Vec<Pos2> {
+    use std::f32::consts::FRAC_PI_2;
+    let mut points = Vec::new();
+    // Chaque coin : (centre de l'arc, angle de départ).
+    let coins = [
+        (
+            Pos2::new(rect.right() - rayon, rect.top() + rayon),
+            -FRAC_PI_2,
+        ),
+        (Pos2::new(rect.right() - rayon, rect.bottom() - rayon), 0.0),
+        (
+            Pos2::new(rect.left() + rayon, rect.bottom() - rayon),
+            FRAC_PI_2,
+        ),
+        (
+            Pos2::new(rect.left() + rayon, rect.top() + rayon),
+            2.0 * FRAC_PI_2,
+        ),
+    ];
+    for (centre, depart) in coins {
+        for i in 0..=8 {
+            let angle = depart + FRAC_PI_2 * i as f32 / 8.0;
+            points.push(centre + Vec2::new(angle.cos(), angle.sin()) * rayon);
+        }
+    }
+    points.push(points[0]);
+    points
+}
+
+/// Un bouton de SIMULATION : fond blanc, contour en pointillés, texte gris foncé en semi-gras.
+/// Il remplace ce qu'un vrai terminal de paiement ou un vrai lecteur ferait (la maquette les
+/// dessine ainsi). Vrai contrôle : focus clavier, survol, nom complet pour les lecteurs d'écran.
+pub(crate) fn bouton_pointille(
+    ui: &mut Ui,
+    texte: &str,
+    taille: Vec2,
+    taille_police: f32,
+) -> Response {
+    let (rect, reponse) = ui.allocate_exact_size(taille, Sense::click());
+    if ui.is_rect_visible(rect) {
+        let galerie = ui.painter().layout_no_wrap(
+            texte.to_string(),
+            police_disponible(ui.ctx(), Graisse::SemiGrasse, taille_police),
+            couleur(TEXTE_SIMULATION),
+        );
+        let peintre = ui.painter();
+        peintre.rect_filled(rect, CornerRadius::same(10), couleur(SURFACE));
+        if reponse.hovered() {
+            peintre.rect_filled(rect, CornerRadius::same(10), Color32::from_black_alpha(18));
+        }
+        let trait_ = Stroke::new(1.0, couleur(BORDURE_POINTILLEE));
+        peintre.extend(Shape::dashed_line(
+            &contour_arrondi(rect.shrink(0.5), 10.0),
+            trait_,
+            4.0,
+            3.0,
+        ));
+        peintre.galley(
+            rect.center() - galerie.size() / 2.0,
+            galerie,
+            couleur(TEXTE_SIMULATION),
+        );
+    }
+    anneau_de_focus(ui, &reponse, 10);
+    reponse.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, texte));
+    reponse.on_hover_cursor(CursorIcon::PointingHand)
 }
 
 /// Les initiales d'un produit (deux lettres au plus) : première lettre des deux premiers mots, ou
