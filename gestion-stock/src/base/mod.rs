@@ -1,8 +1,10 @@
 //! La base de données MySQL (le MariaDB de XAMPP) : configuration, schéma, dépôt.
 
 pub mod configuration;
+pub mod migrations;
 
 pub use configuration::Configuration;
+pub use migrations::{VERSION_COURANTE, migrer, version};
 
 use crate::erreur::ErreurStock;
 

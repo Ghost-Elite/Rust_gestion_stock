@@ -172,7 +172,8 @@ impl Configuration {
         }
     }
 
-    /// Les options de connexion : 3 secondes pour joindre le serveur, 5 pour lire ou écrire.
+    /// Les options de connexion : 3 secondes pour joindre le serveur, 5 pour lire ou écrire, et le
+    /// mode strict du serveur (une valeur trop grande est refusée, pas coupée en silence).
     pub fn options(&self) -> Opts {
         OptsBuilder::new()
             .ip_or_hostname(Some(self.hote.clone()))
@@ -183,6 +184,9 @@ impl Configuration {
             .tcp_connect_timeout(Some(Duration::from_secs(3)))
             .read_timeout(Some(Duration::from_secs(5)))
             .write_timeout(Some(Duration::from_secs(5)))
+            .init(vec![
+                "SET SESSION sql_mode = 'STRICT_ALL_TABLES,NO_ENGINE_SUBSTITUTION'".to_string(),
+            ])
             .into()
     }
 }
@@ -346,5 +350,12 @@ caisse=04
         assert!(options.get_tcp_connect_timeout().is_some());
         assert!(options.get_read_timeout().is_some());
         assert!(options.get_write_timeout().is_some());
+        // Strict : un nom trop long est refusé, jamais coupé en silence.
+        assert!(
+            options
+                .get_init()
+                .iter()
+                .any(|c| c.contains("STRICT_ALL_TABLES"))
+        );
     }
 }
