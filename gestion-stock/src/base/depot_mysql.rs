@@ -10,12 +10,14 @@ use super::{Configuration, erreur_de_base};
 use crate::depot::Depot;
 use crate::erreur::ErreurStock;
 use crate::horodatage::Horodatage;
+use crate::journal::{HASH_INITIAL, empreinte};
 use crate::monnaie::{Devise, Montant};
 use crate::reglages::{Profil, Reglages};
 use crate::stock::{Genre, Mouvement, Produit, Stock};
 use crate::vente::{GenrePiece, LigneVente, Moyen, Piece};
 use mysql::prelude::Queryable;
 use mysql::{AccessMode, Conn, IsolationLevel, Transaction, TxOpts};
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 
 /// La longueur maximale d'un nom de produit, en caractères (la colonne est un `VARCHAR(190)`).
@@ -278,11 +280,176 @@ fn ecrire_mouvements(
     Ok(())
 }
 
+/// Une coupure de la communication : on ne sait pas si la dernière commande est arrivée.
+fn est_coupure(e: &mysql::Error) -> bool {
+    use mysql::Error::{CodecError, DriverError, IoError};
+    matches!(e, IoError(_) | CodecError(_) | DriverError(_))
+}
+
+/// La tête du journal de ce poste, verrouillée : le dernier numéro et la dernière empreinte.
+fn verrouiller_la_tete(tx: &mut Transaction<'_>, caisse: &str) -> Result<(u64, String), Echec> {
+    let tete: Option<(u64, String)> = tx.exec_first(
+        "SELECT dernier_numero, dernier_hash FROM caisse WHERE code = ? FOR UPDATE",
+        (caisse,),
+    )?;
+    tete.ok_or_else(|| {
+        Echec::Regle(ErreurStock::Base(format!(
+            "La caisse « {caisse} » n'existe pas dans la base."
+        )))
+    })
+}
+
+/// La dernière pièce du journal de ce poste (celle que dit la tête), ou `None` s'il est vide. Si
+/// la tête et la pièce ne s'accordent pas, le journal a été modifié.
+fn derniere_piece(
+    tx: &mut Transaction<'_>,
+    caisse: &str,
+    numero: u64,
+    hash: &str,
+) -> Result<Option<Piece>, Echec> {
+    if numero == 0 {
+        return Ok(None);
+    }
+    match charger_piece(tx, caisse, numero, false)? {
+        Some(piece) if piece.hash == hash => Ok(Some(piece)),
+        _ => Err(Echec::Regle(ErreurStock::JournalAltere { numero })),
+    }
+}
+
+/// Écrit les nouvelles quantités des produits que l'opération a changés.
+fn ecrire_quantites(
+    tx: &mut Transaction<'_>,
+    avant: &[Produit],
+    apres: &[Produit],
+) -> Result<(), Echec> {
+    for produit in apres {
+        let inchange = avant
+            .iter()
+            .any(|p| cle(&p.nom) == cle(&produit.nom) && p.quantite == produit.quantite);
+        if !inchange {
+            tx.exec_drop(
+                "UPDATE produit SET quantite = ? WHERE nom_cle = ?",
+                (produit.quantite, cle(&produit.nom)),
+            )?;
+        }
+    }
+    Ok(())
+}
+
+/// Écrit une pièce du journal et ses lignes.
+fn ecrire_piece(tx: &mut Transaction<'_>, caisse: &str, piece: &Piece) -> Result<(), Echec> {
+    let (genre, annule) = match piece.genre {
+        GenrePiece::Vente => ("V", None),
+        GenrePiece::Annulation { de } => ("A", Some(de)),
+    };
+    tx.exec_drop(
+        "INSERT INTO piece (caisse, numero, genre, annule_numero, utc, decalage_minutes, total, \
+         moyen, recu, rendu, hash_precedent, hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            caisse,
+            piece.numero,
+            genre,
+            annule,
+            piece.horodatage.utc,
+            piece.horodatage.decalage_minutes,
+            piece.total.0,
+            piece.moyen.code(),
+            piece.recu.0,
+            piece.rendu.0,
+            &piece.hash_precedent,
+            &piece.hash,
+        ),
+    )?;
+    for (rang, ligne) in piece.lignes.iter().enumerate() {
+        tx.exec_drop(
+            "INSERT INTO piece_ligne (caisse, numero, rang, nom, nom_cle, quantite, prix, taux_bp) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                caisse,
+                piece.numero,
+                rang as u64,
+                &ligne.nom,
+                cle(&ligne.nom),
+                ligne.quantite,
+                ligne.prix.0,
+                ligne.taux_bp,
+            ),
+        )?;
+    }
+    Ok(())
+}
+
+/// Tout ce qu'une vente ou une annulation écrit : quantités, mouvements (liés à la pièce), la
+/// pièce, puis la nouvelle tête du journal.
+fn ecrire_les_effets(
+    tx: &mut Transaction<'_>,
+    caisse: &str,
+    avant: &[Produit],
+    stock: &Stock,
+    piece: &Piece,
+) -> Result<(), Echec> {
+    ecrire_quantites(tx, avant, &stock.produits)?;
+    ecrire_mouvements(tx, caisse, &stock.historique, Some(piece.numero))?;
+    ecrire_piece(tx, caisse, piece)?;
+    tx.exec_drop(
+        "UPDATE caisse SET dernier_numero = ?, dernier_hash = ? WHERE code = ?",
+        (piece.numero, &piece.hash, caisse),
+    )?;
+    Ok(())
+}
+
+/// Une pièce lue en base, avec son numéro : l'erreur est gardée pour que le vérificateur nomme la
+/// pièce illisible.
+type PieceLue = (u64, Result<Piece, ErreurStock>);
+
+/// Jusqu'à `limite` pièces de la caisse après le numéro `apres`, avec leurs lignes. Une pièce
+/// illisible est rendue avec son numéro et son erreur, pour que le vérificateur la signale.
+fn lire_un_morceau(
+    tx: &mut Transaction<'_>,
+    caisse: &str,
+    apres: u64,
+    limite: u32,
+) -> Result<Vec<PieceLue>, Echec> {
+    let entetes: Vec<LignePiece> = tx.exec(
+        format!(
+            "SELECT {COLONNES_PIECE} FROM piece WHERE caisse = ? AND numero > ? \
+             ORDER BY numero LIMIT ?"
+        ),
+        (caisse, apres, limite),
+    )?;
+    let Some(derniere) = entetes.last().map(|e| e.0) else {
+        return Ok(Vec::new());
+    };
+    let lignes: Vec<(u64, String, u32, i64, u32)> = tx.exec(
+        "SELECT numero, nom, quantite, prix, taux_bp FROM piece_ligne \
+         WHERE caisse = ? AND numero > ? AND numero <= ? ORDER BY numero, rang",
+        (caisse, apres, derniere),
+    )?;
+    let mut par_piece: BTreeMap<u64, Vec<LigneVente>> = BTreeMap::new();
+    for (numero, nom, quantite, prix, taux_bp) in lignes {
+        par_piece
+            .entry(numero)
+            .or_default()
+            .push(ligne_vente((nom, quantite, prix, taux_bp)));
+    }
+    Ok(entetes
+        .into_iter()
+        .map(|entete| {
+            let numero = entete.0;
+            let lignes = par_piece.remove(&numero).unwrap_or_default();
+            (numero, piece_depuis(entete, lignes))
+        })
+        .collect())
+}
+
 // ---- Le dépôt ---------------------------------------------------------------------------------
 
 pub struct DepotMysql {
     config: Configuration,
     connexion: Conn,
+    /// Pour les tests de coupure : appelé juste avant la validation d'une transaction, avec le
+    /// numéro de la connexion.
+    crochet: Option<Box<dyn FnMut(u64)>>,
 }
 
 impl DepotMysql {
@@ -318,6 +485,7 @@ impl DepotMysql {
         Ok(DepotMysql {
             config: config.clone(),
             connexion,
+            crochet: None,
         })
     }
 
@@ -353,34 +521,114 @@ impl DepotMysql {
     /// Exécute `operation` dans une transaction (verrous en lecture validée). Une règle qui
     /// refuse, ou une erreur du serveur, annule tout. Un blocage mutuel détecté par le serveur est
     /// rejoué une fois : la transaction avait été annulée, rien n'a changé.
-    fn transaction<R>(
+    fn transaction_brute<R>(
         &mut self,
         mut operation: impl FnMut(&mut Transaction<'_>, &str) -> Result<R, Echec>,
-    ) -> Result<R, ErreurStock> {
+    ) -> Result<R, Echec> {
         for essai in 0..2 {
-            self.assurer_la_connexion()?;
+            self.assurer_la_connexion().map_err(Echec::Regle)?;
             let caisse = self.config.caisse.clone();
             let options =
                 TxOpts::default().set_isolation_level(Some(IsolationLevel::ReadCommitted));
+            let connexion = &mut self.connexion;
+            let crochet = &mut self.crochet;
             let resultat = (|| -> Result<R, Echec> {
-                let mut tx = self.connexion.start_transaction(options)?;
+                let mut tx = connexion.start_transaction(options)?;
                 let valeur = operation(&mut tx, &caisse)?;
+                if let Some(crochet) = crochet.as_mut() {
+                    let id: Option<u64> = tx.query_first("SELECT CONNECTION_ID()")?;
+                    crochet(id.unwrap_or(0));
+                }
                 tx.commit()?;
                 Ok(valeur)
             })();
             match resultat {
-                Ok(valeur) => return Ok(valeur),
-                Err(Echec::Regle(e)) => return Err(e),
                 Err(Echec::Serveur(e)) if essai == 0 && est_blocage(&e) => continue,
-                Err(Echec::Serveur(e)) => return Err(erreur_de_base(&e, &self.config)),
+                autre => return autre,
             }
         }
         unreachable!("la seconde tentative renvoie toujours un résultat")
     }
-}
 
-fn pas_encore_realise<T>() -> Result<T, ErreurStock> {
-    Err(ErreurStock::Base("pas encore réalisé".to_string()))
+    fn transaction<R>(
+        &mut self,
+        operation: impl FnMut(&mut Transaction<'_>, &str) -> Result<R, Echec>,
+    ) -> Result<R, ErreurStock> {
+        match self.transaction_brute(operation) {
+            Ok(valeur) => Ok(valeur),
+            Err(Echec::Regle(e)) => Err(e),
+            Err(Echec::Serveur(e)) => Err(erreur_de_base(&e, &self.config)),
+        }
+    }
+
+    /// Une vente ou une annulation : une transaction qui écrit une pièce. Si la communication
+    /// tombe, on ne réessaie JAMAIS d'écrire : on relit le journal pour savoir si la pièce est
+    /// entrée (alors c'est un succès) ou non (alors rien n'a été enregistré, c'est un échec sûr).
+    /// Si même cette relecture est impossible, on le dit, pour qu'on ne refasse pas la vente à
+    /// l'aveugle.
+    fn ecrire_une_piece(
+        &mut self,
+        mut operation: impl FnMut(&mut Transaction<'_>, &str) -> Result<Piece, Echec>,
+    ) -> Result<Piece, ErreurStock> {
+        let attendue: RefCell<Option<Piece>> = RefCell::new(None);
+        let resultat = self.transaction_brute(|tx, caisse| {
+            let piece = operation(tx, caisse)?;
+            *attendue.borrow_mut() = Some(piece.clone());
+            Ok(piece)
+        });
+        match resultat {
+            Ok(piece) => Ok(piece),
+            Err(Echec::Regle(e)) => Err(e),
+            Err(Echec::Serveur(e)) if est_coupure(&e) => {
+                let Some(attendue) = attendue.into_inner() else {
+                    // La pièce n'a même pas été calculée : rien n'a pu être écrit.
+                    return Err(erreur_de_base(&e, &self.config));
+                };
+                match self.piece_est_entree(&attendue) {
+                    Ok(true) => Ok(attendue),
+                    Ok(false) => Err(erreur_de_base(&e, &self.config)),
+                    Err(_) => Err(ErreurStock::Base(
+                        "Le serveur a cessé de répondre pendant l'enregistrement : la vente a peut-être été enregistrée. Vérifiez l'historique avant de la refaire."
+                            .to_string(),
+                    )),
+                }
+            }
+            Err(Echec::Serveur(e)) => Err(erreur_de_base(&e, &self.config)),
+        }
+    }
+
+    /// Vrai si cette pièce, telle quelle (mêmes lignes, mêmes empreintes), est dans le journal de
+    /// ce poste. Se reconnecte au besoin.
+    #[doc(hidden)]
+    pub fn piece_est_entree(&mut self, piece: &Piece) -> Result<bool, ErreurStock> {
+        self.assurer_la_connexion()?;
+        let caisse = self.config.caisse.clone();
+        let numero = piece.numero;
+        let connexion = &mut self.connexion;
+        let resultat = (|| -> Result<Option<Piece>, Echec> {
+            let mut tx = connexion.start_transaction(TxOpts::default())?;
+            let trouvee = charger_piece(&mut tx, &caisse, numero, false)?;
+            tx.commit()?;
+            Ok(trouvee)
+        })();
+        match resultat {
+            Ok(trouvee) => Ok(trouvee.as_ref() == Some(piece)),
+            Err(Echec::Regle(e)) => Err(e),
+            Err(Echec::Serveur(e)) => Err(erreur_de_base(&e, &self.config)),
+        }
+    }
+
+    /// Pour les tests de coupure : `crochet` est appelé juste avant la validation de chaque
+    /// transaction, avec le numéro de la connexion (de quoi la tuer depuis l'extérieur).
+    #[doc(hidden)]
+    pub fn installer_un_crochet_avant_validation(&mut self, crochet: Box<dyn FnMut(u64)>) {
+        self.crochet = Some(crochet);
+    }
+
+    #[doc(hidden)]
+    pub fn retirer_le_crochet(&mut self) {
+        self.crochet = None;
+    }
 }
 
 impl Depot for DepotMysql {
@@ -576,20 +824,108 @@ impl Depot for DepotMysql {
 
     fn encaisser(
         &mut self,
-        _demande: &[(String, u32)],
-        _moyen: Moyen,
-        _recu: Montant,
-        _quand: Horodatage,
+        demande: &[(String, u32)],
+        moyen: Moyen,
+        recu: Montant,
+        quand: Horodatage,
     ) -> Result<Piece, ErreurStock> {
-        pas_encore_realise()
+        let cles: Vec<String> = demande.iter().map(|(nom, _)| cle(nom)).collect();
+        self.ecrire_une_piece(|tx, caisse| {
+            let (dernier_numero, dernier_hash) = verrouiller_la_tete(tx, caisse)?;
+            let reglages = lire_reglages(tx, false)?;
+            let produits = charger_produits(tx, &cles)?;
+            let derniere = derniere_piece(tx, caisse, dernier_numero, &dernier_hash)?;
+            let mut stock =
+                Stock::partiel(produits.clone(), reglages, derniere.into_iter().collect());
+            let piece = stock.encaisser(demande, moyen, recu, quand)?.clone();
+            ecrire_les_effets(tx, caisse, &produits, &stock, &piece)?;
+            Ok(piece)
+        })
     }
 
-    fn annuler(&mut self, _numero: u64, _quand: Horodatage) -> Result<Piece, ErreurStock> {
-        pas_encore_realise()
+    fn annuler(&mut self, numero: u64, quand: Horodatage) -> Result<Piece, ErreurStock> {
+        self.ecrire_une_piece(|tx, caisse| {
+            let (dernier_numero, dernier_hash) = verrouiller_la_tete(tx, caisse)?;
+            let reglages = lire_reglages(tx, false)?;
+            let derniere = derniere_piece(tx, caisse, dernier_numero, &dernier_hash)?;
+            let origine = charger_piece(tx, caisse, numero, true)?;
+            let numero_annulation: Option<u64> = tx.exec_first(
+                "SELECT numero FROM piece WHERE caisse = ? AND annule_numero = ?",
+                (caisse, numero),
+            )?;
+            let annulation = match numero_annulation {
+                Some(n) => charger_piece(tx, caisse, n, true)?,
+                None => None,
+            };
+            let cles: Vec<String> = origine
+                .iter()
+                .flat_map(|p| p.lignes.iter().map(|l| cle(&l.nom)))
+                .collect();
+            let mut pieces: Vec<Piece> = [origine, annulation, derniere]
+                .into_iter()
+                .flatten()
+                .collect();
+            pieces.sort_by_key(|p| p.numero);
+            pieces.dedup_by_key(|p| p.numero);
+            let produits = charger_produits(tx, &cles)?;
+            let mut stock = Stock::partiel(produits.clone(), reglages, pieces);
+            let piece = stock.annuler(numero, quand)?.clone();
+            ecrire_les_effets(tx, caisse, &produits, &stock, &piece)?;
+            Ok(piece)
+        })
     }
 
     fn verifier_journal(&mut self) -> Result<(), ErreurStock> {
-        pas_encore_realise()
+        self.assurer_la_connexion()?;
+        let caisse = self.config.caisse.clone();
+        let options = TxOpts::default()
+            .set_isolation_level(Some(IsolationLevel::RepeatableRead))
+            .set_with_consistent_snapshot(true)
+            .set_access_mode(Some(AccessMode::ReadOnly));
+        let connexion = &mut self.connexion;
+        let resultat = (|| -> Result<(), Echec> {
+            let mut tx = connexion.start_transaction(options)?;
+            let tete: Option<(u64, String)> = tx.exec_first(
+                "SELECT dernier_numero, dernier_hash FROM caisse WHERE code = ?",
+                (&caisse,),
+            )?;
+            let (tete_numero, tete_hash) = tete.unwrap_or((0, HASH_INITIAL.to_string()));
+            let mut attendu = HASH_INITIAL.to_string();
+            let mut dernier = 0u64;
+            // Toute la chaîne, par morceaux de 1 000 pièces : jamais tout en mémoire.
+            loop {
+                let morceau = lire_un_morceau(&mut tx, &caisse, dernier, 1000)?;
+                if morceau.is_empty() {
+                    break;
+                }
+                for (numero, piece) in morceau {
+                    let altere = Echec::Regle(ErreurStock::JournalAltere { numero });
+                    let Ok(piece) = piece else {
+                        return Err(altere);
+                    };
+                    if piece.numero != dernier + 1
+                        || piece.hash_precedent != attendu
+                        || piece.hash != empreinte(&piece.hash_precedent, &piece)
+                    {
+                        return Err(altere);
+                    }
+                    attendu = piece.hash;
+                    dernier = piece.numero;
+                }
+            }
+            if dernier != tete_numero || attendu != tete_hash {
+                return Err(Echec::Regle(ErreurStock::JournalAltere {
+                    numero: dernier.max(tete_numero),
+                }));
+            }
+            tx.commit()?;
+            Ok(())
+        })();
+        match resultat {
+            Ok(()) => Ok(()),
+            Err(Echec::Regle(e)) => Err(e),
+            Err(Echec::Serveur(e)) => Err(erreur_de_base(&e, &self.config)),
+        }
     }
 }
 

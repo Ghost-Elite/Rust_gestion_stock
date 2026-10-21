@@ -463,3 +463,269 @@ fn supprimer_un_produit_garde_son_historique() {
         ErreurStock::ProduitInconnu("Sel".to_string())
     );
 }
+
+// ---- Vendre, annuler, vérifier le journal ---------------------------------------------------------
+
+use gestion_stock::horodatage::Horodatage;
+use gestion_stock::stock::Stock;
+use gestion_stock::vente::{GenrePiece, Moyen};
+
+const QUAND: Horodatage = Horodatage {
+    utc: 1_700_000_000,
+    decalage_minutes: 60,
+};
+
+fn panier(articles: &[(&str, u32)]) -> Vec<(String, u32)> {
+    articles.iter().map(|(n, q)| (n.to_string(), *q)).collect()
+}
+
+/// Riz (10 en stock, 3,50 à 5,5 %) et Pain (10, 1,20 à 5,5 %).
+fn boutique(d: &mut DepotMysql) {
+    for (nom, prix) in [("Riz", 350), ("Pain", 120)] {
+        d.ajouter_produit(nom, 0).unwrap();
+        d.enregistrer_entree(nom, 10).unwrap();
+        d.definir_prix(nom, Some(Montant(prix)), Some(550)).unwrap();
+    }
+}
+
+#[test]
+#[ignore = "demande un serveur MySQL (KORA_TEST_URL)"]
+fn le_depot_mysql_obeit_aux_memes_regles_que_le_depot_fichier() {
+    let base = BaseJetable::creer();
+    let mut d = depot(&base);
+    commun::conformite::parcourir_les_regles(&mut d);
+    assert_eq!(compte(&base, "piece"), 4);
+    let tete: (u64, String) = base
+        .connexion()
+        .query_first("SELECT dernier_numero, dernier_hash FROM caisse WHERE code = '01'")
+        .unwrap()
+        .unwrap();
+    let pieces = d.instantane().unwrap().pieces().to_vec();
+    assert_eq!(
+        (tete.0, tete.1),
+        (4, pieces[3].hash.clone()),
+        "la tête de la caisse suit le journal"
+    );
+}
+
+#[test]
+#[ignore = "demande un serveur MySQL (KORA_TEST_URL)"]
+fn une_vente_en_base_donne_la_meme_piece_que_le_stock_en_memoire() {
+    let base = BaseJetable::creer();
+    let mut d = depot(&base);
+    boutique(&mut d);
+    let en_base = d
+        .encaisser(
+            &panier(&[("Riz", 2), ("pain", 1)]),
+            Moyen::Especes,
+            Montant(2000),
+            QUAND,
+        )
+        .unwrap();
+
+    let mut memoire = Stock::nouveau();
+    for (nom, prix) in [("Riz", 350), ("Pain", 120)] {
+        memoire.ajouter_produit(nom, 0).unwrap();
+        memoire.enregistrer_entree(nom, 10).unwrap();
+        memoire
+            .definir_prix(nom, Some(Montant(prix)), Some(550))
+            .unwrap();
+    }
+    let attendue = memoire
+        .encaisser(
+            &panier(&[("Riz", 2), ("pain", 1)]),
+            Moyen::Especes,
+            Montant(2000),
+            QUAND,
+        )
+        .unwrap()
+        .clone();
+    assert_eq!(
+        en_base, attendue,
+        "mêmes lignes, mêmes montants, mêmes empreintes"
+    );
+    assert_eq!(d.instantane().unwrap().pieces(), [attendue]);
+}
+
+#[test]
+#[ignore = "demande un serveur MySQL (KORA_TEST_URL)"]
+fn annuler_remet_le_stock_et_ne_se_fait_qu_une_fois() {
+    let base = BaseJetable::creer();
+    let mut d = depot(&base);
+    boutique(&mut d);
+    d.encaisser(&panier(&[("Riz", 3)]), Moyen::Carte, Montant(0), QUAND)
+        .unwrap();
+    assert_eq!(quantite(&mut d, "Riz"), 7);
+    let annulation = d.annuler(1, QUAND).unwrap();
+    assert_eq!(
+        (annulation.numero, annulation.genre),
+        (2, GenrePiece::Annulation { de: 1 })
+    );
+    assert_eq!(quantite(&mut d, "Riz"), 10);
+    let annule: Option<u64> = base
+        .connexion()
+        .query_first("SELECT annule_numero FROM piece WHERE numero = 2")
+        .unwrap()
+        .unwrap();
+    assert_eq!(annule, Some(1));
+    let numeros: Vec<Option<u64>> = base
+        .connexion()
+        .query("SELECT piece_numero FROM mouvement WHERE piece_numero IS NOT NULL ORDER BY id")
+        .unwrap();
+    assert_eq!(
+        numeros,
+        [Some(1), Some(2)],
+        "les mouvements de vente et d'annulation sont liés à leur pièce"
+    );
+    assert_eq!(
+        d.annuler(1, QUAND).unwrap_err(),
+        ErreurStock::DejaAnnulee(1)
+    );
+    assert_eq!(
+        d.annuler(2, QUAND).unwrap_err(),
+        ErreurStock::AnnulationNonPermise(2)
+    );
+    assert_eq!(
+        d.annuler(7, QUAND).unwrap_err(),
+        ErreurStock::PieceInconnue(7)
+    );
+    assert_eq!(quantite(&mut d, "Riz"), 10);
+    d.verifier_journal().unwrap();
+}
+
+#[test]
+#[ignore = "demande un serveur MySQL (KORA_TEST_URL)"]
+fn une_vente_refusee_ne_laisse_aucune_trace_et_le_numero_ne_saute_pas() {
+    let base = BaseJetable::creer();
+    let mut d = depot(&base);
+    boutique(&mut d);
+    let avant = (compte(&base, "piece"), compte(&base, "mouvement"));
+    assert!(matches!(
+        d.encaisser(
+            &panier(&[("Pain", 1), ("Riz", 99)]),
+            Moyen::Carte,
+            Montant(0),
+            QUAND
+        ),
+        Err(ErreurStock::StockInsuffisant { .. })
+    ));
+    assert_eq!((compte(&base, "piece"), compte(&base, "mouvement")), avant);
+    assert_eq!(
+        quantite(&mut d, "Pain"),
+        10,
+        "le Pain du panier refusé n'a pas bougé"
+    );
+    let piece = d
+        .encaisser(&panier(&[("Pain", 1)]), Moyen::Carte, Montant(0), QUAND)
+        .unwrap();
+    assert_eq!(piece.numero, 1);
+}
+
+#[test]
+#[ignore = "demande un serveur MySQL (KORA_TEST_URL)"]
+fn le_journal_modifie_a_la_main_est_detecte_avec_le_bon_numero() {
+    let base = BaseJetable::creer();
+    let mut d = depot(&base);
+    boutique(&mut d);
+    for _ in 0..3 {
+        d.encaisser(&panier(&[("Pain", 1)]), Moyen::Carte, Montant(0), QUAND)
+            .unwrap();
+    }
+    d.verifier_journal().unwrap();
+    base.connexion()
+        .query_drop("UPDATE piece_ligne SET quantite = quantite + 1 WHERE numero = 2")
+        .unwrap();
+    assert_eq!(
+        d.verifier_journal().unwrap_err(),
+        ErreurStock::JournalAltere { numero: 2 }
+    );
+    base.connexion()
+        .query_drop("UPDATE piece_ligne SET quantite = quantite - 1 WHERE numero = 2")
+        .unwrap();
+    d.verifier_journal().unwrap();
+    // La tête de la caisse est vérifiée aussi.
+    base.connexion()
+        .query_drop("UPDATE caisse SET dernier_numero = 2 WHERE code = '01'")
+        .unwrap();
+    assert!(matches!(
+        d.verifier_journal(),
+        Err(ErreurStock::JournalAltere { .. })
+    ));
+}
+
+#[test]
+#[ignore = "demande un serveur MySQL (KORA_TEST_URL)"]
+fn un_journal_vide_est_valide_et_chaque_caisse_a_le_sien() {
+    let base = BaseJetable::creer();
+    let mut une = depot(&base);
+    let mut quatre = DepotMysql::connecter(&base.config_caisse("04")).unwrap();
+    une.verifier_journal().unwrap();
+    boutique(&mut une);
+    let v1 = une
+        .encaisser(&panier(&[("Pain", 1)]), Moyen::Carte, Montant(0), QUAND)
+        .unwrap();
+    let v4 = quatre
+        .encaisser(&panier(&[("Pain", 1)]), Moyen::Carte, Montant(0), QUAND)
+        .unwrap();
+    assert_eq!(
+        (v1.numero, v4.numero),
+        (1, 1),
+        "chaque caisse numérote ses tickets"
+    );
+    assert_eq!(
+        v1.hash_precedent, v4.hash_precedent,
+        "chaque journal repart de zéro"
+    );
+    assert_eq!(quantite(&mut une, "Pain"), 8, "le stock, lui, est partagé");
+    assert_eq!(une.instantane().unwrap().pieces().len(), 1);
+    assert_eq!(quatre.instantane().unwrap().pieces().len(), 1);
+    une.verifier_journal().unwrap();
+    quatre.verifier_journal().unwrap();
+}
+
+#[test]
+#[ignore = "demande un serveur MySQL (KORA_TEST_URL)"]
+fn une_coupure_avant_la_validation_n_enregistre_rien_et_la_caisse_repart_sans_trou() {
+    let base = BaseJetable::creer();
+    let mut d = depot(&base);
+    boutique(&mut d);
+    let admin = base.connexion_admin();
+    d.installer_un_crochet_avant_validation(Box::new(move |id| {
+        let mut c = admin.lock().unwrap();
+        mysql::prelude::Queryable::query_drop(&mut *c, format!("KILL CONNECTION {id}")).unwrap();
+    }));
+    let avant = (compte(&base, "piece"), compte(&base, "mouvement"));
+    let e = d
+        .encaisser(&panier(&[("Riz", 1)]), Moyen::Carte, Montant(0), QUAND)
+        .unwrap_err();
+    assert!(matches!(e, ErreurStock::Base(_)), "{e:?}");
+    assert!(e.to_string().contains("ne répond pas"), "{e}");
+    assert_eq!((compte(&base, "piece"), compte(&base, "mouvement")), avant);
+    d.retirer_le_crochet();
+    assert_eq!(quantite(&mut d, "Riz"), 10);
+    // La caisse se reconnecte toute seule et le numéro suivant est bien le 1.
+    let piece = d
+        .encaisser(&panier(&[("Riz", 1)]), Moyen::Carte, Montant(0), QUAND)
+        .unwrap();
+    assert_eq!(piece.numero, 1);
+    d.verifier_journal().unwrap();
+}
+
+#[test]
+#[ignore = "demande un serveur MySQL (KORA_TEST_URL)"]
+fn on_sait_si_une_piece_est_bien_entree_dans_le_journal() {
+    let base = BaseJetable::creer();
+    let mut d = depot(&base);
+    boutique(&mut d);
+    let piece = d
+        .encaisser(&panier(&[("Pain", 1)]), Moyen::Carte, Montant(0), QUAND)
+        .unwrap();
+    assert!(d.piece_est_entree(&piece).unwrap());
+    let autre = gestion_stock::vente::Piece {
+        total: Montant(piece.total.0 + 1),
+        ..piece.clone()
+    };
+    assert!(!d.piece_est_entree(&autre).unwrap());
+    let suivante = gestion_stock::vente::Piece { numero: 2, ..piece };
+    assert!(!d.piece_est_entree(&suivante).unwrap());
+}

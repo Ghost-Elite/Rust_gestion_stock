@@ -73,6 +73,14 @@ impl BaseJetable {
         }
     }
 
+    /// Une connexion d'administration partageable avec un crochet de test (pour tuer une
+    /// connexion du dépôt).
+    pub fn connexion_admin(&self) -> std::sync::Arc<std::sync::Mutex<Conn>> {
+        std::sync::Arc::new(std::sync::Mutex::new(
+            Conn::new(self.admin.clone()).expect("connexion administrateur"),
+        ))
+    }
+
     /// Une connexion directe, pour inspecter ou abîmer les tables.
     pub fn connexion(&self) -> Conn {
         Conn::new(self.config.options()).expect("connexion à la base jetable")
