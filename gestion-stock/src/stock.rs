@@ -63,7 +63,6 @@ impl Stock {
     /// nomme un produit qu'on veut renommer). Il n'a pas d'historique de mouvements : tous ceux
     /// qu'il contient après une opération sont nouveaux. Les règles du cœur s'y appliquent
     /// telles quelles.
-    #[allow(dead_code)] // DepotMysql l'utilise (tâche 5) ; en attendant, seuls les tests l'appellent.
     pub(crate) fn partiel(produits: Vec<Produit>, reglages: Reglages, pieces: Vec<Piece>) -> Stock {
         Stock {
             produits,
