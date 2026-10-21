@@ -20,6 +20,11 @@ use mysql::{AccessMode, Conn, IsolationLevel, Transaction, TxOpts};
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 
+/// Combien de fois une transaction annulée par le serveur (blocage mutuel) est rejouée : trois
+/// essais en tout. Les verrous sont pris dans un ordre fixe, ce qui doit éviter les blocages ; ceci
+/// n'est qu'un filet.
+const ESSAIS: u32 = 3;
+
 /// La longueur maximale d'un nom de produit, en caractères (la colonne est un `VARCHAR(190)`).
 const LONGUEUR_NOM_MAX: usize = 190;
 
@@ -498,6 +503,11 @@ impl DepotMysql {
     ) -> Result<Produit, ErreurStock> {
         let cle_du_nom = cle(nom);
         self.transaction(|tx, caisse| {
+            // L'ORDRE DES VERROUS est toujours : la ligne de la caisse, puis les produits. Le
+            // mouvement qu'on écrit référence la caisse (clé étrangère), donc le serveur la
+            // verrouillerait de toute façon, mais APRÈS le produit : face à une vente qui tient
+            // la caisse et attend le produit, c'est un interblocage. On la prend donc en premier.
+            verrouiller_la_tete(tx, caisse)?;
             let produits = charger_produits(tx, std::slice::from_ref(&cle_du_nom))?;
             let mut stock = Stock::partiel(produits, Reglages::default(), Vec::new());
             let produit = appliquer(&mut stock)?;
@@ -520,12 +530,12 @@ impl DepotMysql {
 
     /// Exécute `operation` dans une transaction (verrous en lecture validée). Une règle qui
     /// refuse, ou une erreur du serveur, annule tout. Un blocage mutuel détecté par le serveur est
-    /// rejoué une fois : la transaction avait été annulée, rien n'a changé.
+    /// rejoué (voir `ESSAIS`) : la transaction avait été annulée, rien n'a changé.
     fn transaction_brute<R>(
         &mut self,
         mut operation: impl FnMut(&mut Transaction<'_>, &str) -> Result<R, Echec>,
     ) -> Result<R, Echec> {
-        for essai in 0..2 {
+        for essai in 0..ESSAIS {
             self.assurer_la_connexion().map_err(Echec::Regle)?;
             let caisse = self.config.caisse.clone();
             let options =
@@ -543,7 +553,7 @@ impl DepotMysql {
                 Ok(valeur)
             })();
             match resultat {
-                Err(Echec::Serveur(e)) if essai == 0 && est_blocage(&e) => continue,
+                Err(Echec::Serveur(e)) if essai + 1 < ESSAIS && est_blocage(&e) => continue,
                 autre => return autre,
             }
         }

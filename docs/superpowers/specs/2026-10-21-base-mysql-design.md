@@ -82,7 +82,7 @@ Contraintes : `produit.quantite >= 0` (colonne non signée), `piece.annule_numer
 4. Construire un `Stock` partiel avec ces produits, les réglages et la tête du journal ; appeler `Stock::encaisser` (inchangé).
 5. Écrire : nouvelle quantité de chaque produit, un `mouvement` par ligne, la `piece` et ses `piece_ligne`, puis la nouvelle tête dans `caisse`.
 6. Valider. En cas d'erreur de règle (stock insuffisant, montant insuffisant) : annuler la transaction, **rien** n'a changé, le message est celui du cœur.
-7. Un blocage détecté par le serveur (deadlock) ou une coupure : annuler et recommencer une fois ; au deuxième échec, afficher l'erreur. Le poste ne réessaie jamais une vente dont il n'a pas de réponse sûre : il relit la tête de sa caisse pour savoir si la pièce est entrée avant d'annoncer un échec.
+7. Un blocage détecté par le serveur (deadlock) : la transaction, annulée, est rejouée (trois essais en tout) ; au troisième échec, afficher l'erreur. Une coupure : voir ci-dessous. **Ordre des verrous, partout** : la ligne `caisse` d'abord, puis les produits dans l'ordre de leur clé. Les entrées et sorties de stock prennent aussi la ligne `caisse` en premier (le mouvement la référence par clé étrangère : le serveur la verrouillerait sinon après le produit, ce qui provoque des interblocages avec une vente — trouvé par les tests de concurrence). Le poste ne réessaie jamais une vente dont il n'a pas de réponse sûre : il relit la tête de sa caisse pour savoir si la pièce est entrée avant d'annoncer un échec.
 
 Annuler une vente suit le même schéma (verrou de la caisse, des produits de la pièce et de la pièce d'origine). Ajouter, renommer, supprimer un produit, définir un prix, enregistrer une entrée ou une sortie : une transaction chacun.
 
