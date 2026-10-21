@@ -182,7 +182,7 @@ mod tests {
         }
         cliquer(&mut h, BOUTON_RETOUR_VENTE);
         scanner(&mut h, "pain");
-        for ligne in [LIBELLE_SOUS_TOTAL, "Taxe 8.25\u{a0}%", "$0.83", "10.83"] {
+        for ligne in [LIBELLE_SOUS_TOTAL, "Taxe 8.25\u{a0}%", "$0.83", "$10.83"] {
             h.get_by_label(ligne);
         }
 

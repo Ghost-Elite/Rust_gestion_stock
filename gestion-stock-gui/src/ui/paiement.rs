@@ -571,6 +571,26 @@ mod tests {
         assert!(ronds.len() <= 4);
     }
 
+    /// La largeur des fenêtres de la maquette (520 pour les espèces, 480 pour la carte) COMPREND la
+    /// marge de 28 : avant, la marge s'ajoutait et les fenêtres faisaient 56 de trop.
+    #[test]
+    fn les_fenetres_de_paiement_ont_la_largeur_de_la_maquette_marges_comprises() {
+        let largeur = |modale: Modale, titre: &str| {
+            let mut app = a_payer("largeur-fenetre");
+            app.modale = Some(modale);
+            let h = harness_fenetre(app, FENETRE);
+            let rect = h.get_by_role_and_label(Role::Dialog, titre).rect();
+            assert_eq!(rect.center().x, FENETRE.x / 2.0, "{titre} : centrée");
+            rect.width()
+        };
+        assert_eq!(largeur(Modale::Especes, ESPECES_TITRE), 520.0);
+        let carte = Modale::Terminal {
+            moyen: Moyen::Carte,
+            refuse: false,
+        };
+        assert_eq!(largeur(carte, CARTE_TITRE), 480.0);
+    }
+
     #[test]
     fn payer_en_especes_montre_le_rendu_puis_la_vente_terminee() {
         let mut h = harness_vente(a_payer("especes"), FENETRE);

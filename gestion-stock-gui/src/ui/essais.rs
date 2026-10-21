@@ -169,6 +169,22 @@ pub(crate) fn harness_vente(app: Application, taille: Vec2) -> Harness<'static, 
 
 pub(crate) const FENETRE: Vec2 = Vec2::new(TAILLE_FENETRE[0], TAILLE_FENETRE[1]);
 
+/// L'application dans une vraie fenêtre (`eframe::App`), sans marge ajoutée autour : les
+/// coordonnées sont celles de la maquette, en points (zoom 1), thème clair. C'est le harnais des
+/// tests de côtes ; `harness_vente` met un cadre de 8 points autour de l'écran.
+pub(crate) fn harness_fenetre(app: Application, taille: Vec2) -> Harness<'static, Application> {
+    let mut h = Harness::builder()
+        .with_size(taille)
+        .with_pixels_per_point(1.0)
+        .with_theme(eframe::egui::Theme::Light)
+        .build_eframe(|cc| {
+            palette::appliquer(&cc.egui_ctx);
+            app
+        });
+    h.run();
+    h
+}
+
 pub(crate) fn cliquer(h: &mut Harness<'static, Application>, libelle: &str) {
     h.get_by_role_and_label(Role::Button, libelle).click();
     h.run();

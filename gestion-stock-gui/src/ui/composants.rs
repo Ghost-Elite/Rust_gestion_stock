@@ -9,7 +9,7 @@ use crate::police::{Graisse, famille_disponible, police_disponible};
 use eframe::egui::accesskit::Role;
 use eframe::egui::{
     self, Button, Color32, Context, CornerRadius, CursorIcon, FontId, Frame, Id, Layout, Margin,
-    Pos2, Response, RichText, Sense, Stroke, StrokeKind, TextEdit, Ui, Vec2, WidgetInfo,
+    Pos2, Response, RichText, Sense, Stroke, StrokeKind, TextEdit, Ui, UiBuilder, Vec2, WidgetInfo,
     WidgetType,
 };
 
@@ -22,6 +22,38 @@ pub(crate) fn zone(ui: &mut Ui, taille: Vec2, mise_en_page: Layout, contenu: imp
         ui.set_min_size(taille);
         contenu(ui);
     });
+}
+
+/// Une zone de taille EXACTE : elle prend exactement `taille` dans son parent, même si le contenu
+/// est plus grand (il déborde alors, sans rien pousser). La maquette fixe ainsi la hauteur de ses
+/// lignes de texte, alors qu'egui compte 1,3 em par ligne et non 1,25.
+pub(crate) fn zone_fixe(
+    ui: &mut Ui,
+    taille: Vec2,
+    mise_en_page: Layout,
+    contenu: impl FnOnce(&mut Ui),
+) {
+    let (rect, _) = ui.allocate_exact_size(taille, Sense::hover());
+    let mut enfant = ui.new_child(UiBuilder::new().max_rect(rect).layout(mise_en_page));
+    contenu(&mut enfant);
+}
+
+/// Deux lignes de texte (un nom, puis un détail) centrées en hauteur dans une zone de `hauteur`,
+/// comme la maquette centre ses blocs dans la ligne : egui, lui, les poserait en haut.
+pub(crate) fn bloc_de_deux_lignes(
+    ui: &mut Ui,
+    hauteur: f32,
+    ecart: f32,
+    haute: &FontId,
+    basse: &FontId,
+    contenu: impl FnOnce(&mut Ui),
+) {
+    let hauteur_du_bloc = ui
+        .ctx()
+        .fonts_mut(|f| f.row_height(haute) + ecart + f.row_height(basse));
+    ui.add_space(((hauteur - hauteur_du_bloc) / 2.0).max(0.0));
+    ui.spacing_mut().item_spacing.y = ecart;
+    contenu(ui);
 }
 
 /// Une carte blanche aux coins arrondis, plate : un fin bord, pas d'ombre.
@@ -355,6 +387,8 @@ pub(crate) fn repere(ui: &mut Ui, nom: &str, cote: f32) {
     );
 }
 
+const MARGE_DE_LA_FENETRE: f32 = 28.0;
+
 /// Une fenêtre modale : un voile sur tout l'écran, une carte blanche (coins de 16, marge de 28)
 /// de la largeur donnée, annoncée aux lecteurs d'écran comme un dialogue nommé. Renvoie vrai si la
 /// personne veut la fermer (touche Échap, ou clic sur le voile).
@@ -368,7 +402,7 @@ pub(crate) fn modale(
     let cadre = Frame::new()
         .fill(couleur(SURFACE))
         .corner_radius(CornerRadius::same(16))
-        .inner_margin(Margin::same(28));
+        .inner_margin(Margin::same(MARGE_DE_LA_FENETRE as i8));
     // Sans fondu d'apparition : à la caisse la fenêtre doit être là tout de suite (et le relevé
     // de contraste des tests ne doit pas voir des fonds translucides).
     let reponse = egui::Modal::new(Id::new(id))
@@ -376,12 +410,21 @@ pub(crate) fn modale(
         .backdrop_color(VOILE)
         .frame(cadre)
         .show(ctx, |ui| {
-            ui.set_width(largeur);
+            // La largeur de la maquette comprend la marge : le contenu en a 2 × 28 de moins.
+            ui.set_width(largeur - 2.0 * MARGE_DE_LA_FENETRE);
             contenu(ui);
         });
+    let rect = reponse.response.rect;
     ctx.accesskit_node_builder(reponse.response.id, |noeud| {
         noeud.set_role(Role::Dialog);
         noeud.set_label(nom_accessible);
+        // Où se trouve la fenêtre : les loupes d'écran et les tests s'en servent.
+        noeud.set_bounds(eframe::egui::accesskit::Rect {
+            x0: rect.min.x.into(),
+            y0: rect.min.y.into(),
+            x1: rect.max.x.into(),
+            y1: rect.max.y.into(),
+        });
     });
     reponse.should_close()
 }

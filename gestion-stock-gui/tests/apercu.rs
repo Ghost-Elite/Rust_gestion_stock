@@ -12,7 +12,7 @@ use gestion_stock::horodatage::Horodatage;
 use gestion_stock::vente::Moyen;
 use gestion_stock_gui::etat::Etat;
 use gestion_stock_gui::palette;
-use gestion_stock_gui::ui::{Application, Confirmation, Ecran, Modale, dessiner};
+use gestion_stock_gui::ui::{Application, Confirmation, Ecran, Modale};
 
 /// Une boutique d'exemple : des produits en alerte, d'autres corrects, un peu d'historique.
 fn application_exemple(nom: &str) -> Application {
@@ -76,15 +76,74 @@ fn vente_en_cours(nom: &str) -> Application {
 
 fn capturer(nom: &str, taille: Vec2, app: Application) {
     let dossier = std::env::var("APERCU_DOSSIER").unwrap_or_else(|_| "tests/snapshots".into());
+    // L'application est dessinée comme dans la vraie fenêtre (son `App::ui`, sans marge autour),
+    // avec la palette et les polices installées avant la première image, comme `main.rs`.
     let mut h = Harness::builder()
         .wgpu()
         .with_size(taille)
         .with_pixels_per_point(1.0)
-        .build_ui_state(|ui, app: &mut Application| dessiner(ui, app), app);
-    // Comme dans la vraie fenêtre : la palette et les polices avant la première image.
-    palette::appliquer(&h.ctx);
+        // Le banc de test impose le thème sombre APRÈS la création : on force le clair, comme le fait
+        // `palette::appliquer` dans la vraie fenêtre (même sur un Mac en mode sombre).
+        .with_theme(eframe::egui::Theme::Light)
+        .build_eframe(|cc| {
+            palette::appliquer(&cc.egui_ctx);
+            app
+        });
     h.run();
     h.snapshot_options(nom, &SnapshotOptions::new().output_path(dossier));
+}
+
+/// La boutique de la maquette : produits en FCFA, TVA 18 % incluse, à 14 h 32. Sert à comparer
+/// l'écran, élément par élément, aux captures de `maquette/`.
+fn kora_exemple(nom: &str) -> Application {
+    use gestion_stock::monnaie::Devise;
+    use gestion_stock::reglages::Profil;
+    let chemin = std::env::temp_dir().join(format!(
+        "gestion-stock-gui-kora-{}-{nom}.txt",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_file(&chemin);
+    let mut etat = Etat::ouvrir(chemin).unwrap().avec_horloge(|| Horodatage {
+        utc: 1_699_972_320, // 14/11/2023 14:32 (heure locale = UTC)
+        decalage_minutes: 0,
+    });
+    assert!(etat.definir_reglages(Profil::Europe, Devise::Xof, "18"));
+    for (produit, prix, stock) in [
+        ("Riz parfumé 5 kg", "4750", "61"),
+        ("Huile d'arachide 1 L", "1600", "40"),
+        ("Lait en poudre 400 g", "2350", "34"),
+        ("Lait en poudre 900 g", "4900", "12"),
+        ("Lait concentré sucré 397 g", "850", "3"),
+        ("Lait UHT 1 L", "1100", "48"),
+        ("Lait caillé 500 g", "900", "0"),
+        ("Sucre en morceaux 1 kg", "800", "75"),
+        ("Eau minérale 1,5 L", "400", "230"),
+        ("Baguette", "175", "140"),
+        ("Spaghetti 500 g", "650", "30"),
+        ("Concentré de tomate 400 g", "700", "30"),
+        ("Yaourt nature × 4", "1500", "22"),
+        ("Poulet entier", "3400", "9"),
+        ("Café moulu 250 g", "1900", "5"),
+    ] {
+        assert!(etat.ajouter_avec_prix(produit, "0", prix, ""));
+        if stock != "0" {
+            assert!(etat.entree(produit, stock));
+        }
+    }
+    etat.retour = None;
+    let mut app = Application::nouvelle(etat);
+    app.ecran = Ecran::Vente;
+    app.panier = vec![
+        ("Riz parfumé 5 kg".to_string(), 1),
+        ("Huile d'arachide 1 L".to_string(), 2),
+        ("Eau minérale 1,5 L".to_string(), 6),
+        ("Baguette".to_string(), 3),
+        ("Yaourt nature × 4".to_string(), 1),
+        ("Poulet entier".to_string(), 1),
+        ("Concentré de tomate 400 g".to_string(), 2),
+    ];
+    app.ligne_choisie = Some("Concentré de tomate 400 g".to_string());
+    app
 }
 
 // Un test par capture : le moteur de test veut un seul rendu par test. Toutes à la taille de la
@@ -209,4 +268,38 @@ fn apercu_vente_etroite() {
         Vec2::new(640.0, 900.0),
         vente_en_cours("vente-etroite"),
     );
+}
+
+#[test]
+#[ignore = "outil de design : lancer à la main"]
+fn apercu_kora_vente() {
+    capturer("kora_vente", ECRAN, kora_exemple("vente"));
+}
+
+#[test]
+#[ignore = "outil de design : lancer à la main"]
+fn apercu_kora_especes() {
+    let mut app = kora_exemple("especes");
+    app.saisie_recu = "20000".into();
+    app.modale = Some(Modale::Especes);
+    capturer("kora_especes", ECRAN, app);
+}
+
+#[test]
+#[ignore = "outil de design : lancer à la main"]
+fn apercu_kora_carte() {
+    let mut app = kora_exemple("carte");
+    app.modale = Some(Modale::Terminal {
+        moyen: Moyen::Carte,
+        refuse: false,
+    });
+    capturer("kora_carte", ECRAN, app);
+}
+
+#[test]
+#[ignore = "outil de design : lancer à la main"]
+fn apercu_kora_recherche() {
+    let mut app = kora_exemple("recherche");
+    app.ouvrir_la_recherche("lait".into());
+    capturer("kora_recherche", ECRAN, app);
 }

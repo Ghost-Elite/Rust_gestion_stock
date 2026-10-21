@@ -2,14 +2,13 @@
 //! reste, et le mettre au ticket sans quitter l'écran. Dimensions et couleurs :
 //! celles de `maquette/7-recherche.html`.
 
-use super::composants::{LigneBouton, bouton_a_lignes, repere, zone};
+use super::composants::{LigneBouton, bloc_de_deux_lignes, bouton_a_lignes, repere, zone};
 use super::vente::ajouter_au_ticket;
 use super::{Application, LARGEUR_CAISSE_DEUX_COLONNES};
 use crate::etat::LigneProduit;
 use crate::palette::{
     ACCENT, ACCENT_TEXTE, ALERTE_TEXTE, AVERTISSEMENT_TEXTE, FILET, FILET_LIGNE, FOND, GRISE_FOND,
-    GRISE_TEXTE, Rgb, SUCCES_BOUTON, SUCCES_TEXTE, SURFACE, TEXTE, TEXTE_DISCRET, TEXTE_SECONDAIRE,
-    couleur,
+    GRISE_TEXTE, Rgb, SUCCES_BOUTON, SUCCES_TEXTE, SURFACE, TEXTE, TEXTE_DISCRET, couleur,
 };
 use crate::police::{Graisse, police_disponible};
 use crate::textes::*;
@@ -20,7 +19,8 @@ use eframe::egui::{
 
 /// Jusqu'à cette quantité (comprise), l'article est signalé « Plus que N en stock ».
 const STOCK_BAS_MAX: u32 = 5;
-const HAUTEUR_LIGNE: f32 = 84.0;
+/// 64 de repère + 2 × 10 de marge + 1 de filet.
+const HAUTEUR_LIGNE: f32 = 85.0;
 
 /// Ce que l'on écrit du stock d'un article, et la couleur du texte : sans prix il n'est pas
 /// vendable ; à zéro c'est une rupture ; jusqu'à cinq on prévient ; au-delà tout va bien.
@@ -192,29 +192,32 @@ fn ligne_d_article(ui: &mut Ui, ligne: &LigneProduit, prix: Option<&str>, ajoute
     let (etat_texte, etat_couleur) = etat_du_stock(ligne.quantite, ligne.prix.is_some());
     let vendable = ligne.prix.is_some() && ligne.quantite > 0;
     let largeur_nom = (interieur.width() - 64.0 - 150.0 - 150.0 - 3.0 * 20.0).max(80.0);
+    let police_nom = police_disponible(enfant.ctx(), Graisse::Moyenne, 18.0);
     zone(
         &mut enfant,
         Vec2::new(largeur_nom, 64.0),
         Layout::top_down(Align::Min),
         |ui| {
-            ui.spacing_mut().item_spacing.y = 2.0;
-            ui.add(
-                Label::new(
-                    RichText::new(&ligne.nom)
-                        .font(police_disponible(ui.ctx(), Graisse::Moyenne, 18.0))
-                        .color(couleur(TEXTE)),
-                )
-                .truncate()
-                .selectable(false),
-            );
-            ui.add(
-                Label::new(
-                    RichText::new(etat_texte)
-                        .size(14.0)
-                        .color(couleur(etat_couleur)),
-                )
-                .selectable(false),
-            );
+            let police_etat = FontId::proportional(14.0);
+            bloc_de_deux_lignes(ui, 64.0, 2.0, &police_nom, &police_etat, |ui| {
+                ui.add(
+                    Label::new(
+                        RichText::new(&ligne.nom)
+                            .font(police_nom.clone())
+                            .color(couleur(TEXTE)),
+                    )
+                    .truncate()
+                    .selectable(false),
+                );
+                ui.add(
+                    Label::new(
+                        RichText::new(etat_texte)
+                            .size(14.0)
+                            .color(couleur(etat_couleur)),
+                    )
+                    .selectable(false),
+                );
+            });
         },
     );
     zone(
@@ -227,7 +230,7 @@ fn ligne_d_article(ui: &mut Ui, ligne: &LigneProduit, prix: Option<&str>, ajoute
                     Label::new(
                         RichText::new(prix)
                             .font(police_disponible(ui.ctx(), Graisse::SemiGrasse, 19.0))
-                            .color(couleur(TEXTE_SECONDAIRE)),
+                            .color(couleur(TEXTE)),
                     )
                     .selectable(false),
                 );
@@ -298,6 +301,22 @@ mod tests {
         app.ecran = Ecran::Recherche;
         app.recherche_articles = recherche.to_string();
         app
+    }
+
+    /// Dans la maquette, le bloc « nom + stock » est centré en hauteur sur l'image de la ligne,
+    /// et le prix est en noir (et non en gris) comme le nom.
+    #[test]
+    fn une_ligne_de_resultat_centre_son_texte_et_peint_le_prix_en_noir() {
+        let mut app = app_de_recherche("ligne-resultat", "pain");
+        let textes = textes_peints(&mut app, FENETRE, 1.0);
+        let texte = |t: &str| textes.iter().find(|x| x.texte == t).unwrap();
+        let bloc_centre = (texte("Pain").rect.top() + texte(EN_STOCK).rect.bottom()) / 2.0;
+        let repere = texte("PA").rect.center().y;
+        assert!(
+            (bloc_centre - repere).abs() <= 1.0,
+            "bloc centré en {bloc_centre}, repère en {repere}"
+        );
+        assert_eq!(texte("1,20\u{a0}€").couleur, crate::palette::TEXTE);
     }
 
     #[test]

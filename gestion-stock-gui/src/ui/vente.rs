@@ -5,8 +5,8 @@
 //! de paiement de 420, lignes de 68, boutons de paiement de 84 et 72, cases de 64).
 
 use super::composants::{
-    LigneBouton, Style, bandeau_alerte, bouton_a_lignes, bouton_large, bouton_symbole, carte_marge,
-    discret, modale, repere, zone,
+    LigneBouton, Style, bandeau_alerte, bloc_de_deux_lignes, bouton_a_lignes, bouton_large,
+    bouton_symbole, carte_marge, discret, modale, repere, zone, zone_fixe,
 };
 use super::{
     Application, Confirmation, LARGEUR_CAISSE_DEUX_COLONNES, LARGEUR_DEUX_COLONNES, Modale,
@@ -21,8 +21,8 @@ use crate::scan::{ResultatScan, analyser, texte_recherche};
 use crate::textes::*;
 use eframe::egui::{
     Align, CentralPanel, Context, CornerRadius, FontId, Frame, Id, Key, Label, Layout, Margin,
-    Modifiers, Panel, RichText, ScrollArea, Sense, Stroke, TextEdit, Ui, UiBuilder, Vec2,
-    WidgetInfo, WidgetType,
+    Modifiers, Panel, RichText, ScrollArea, Sense, Stroke, TextEdit, TextFormat, Ui, UiBuilder,
+    Vec2, WidgetInfo, WidgetType, text::LayoutJob,
 };
 use gestion_stock::erreur::ErreurStock;
 use gestion_stock::monnaie::{Devise, Montant};
@@ -30,7 +30,8 @@ use gestion_stock::reglages::Profil;
 use gestion_stock::vente::{Devis, Moyen};
 
 const LARGEUR_COLONNE_PAIEMENT: f32 = 420.0;
-const HAUTEUR_LIGNE: f32 = 68.0;
+/// 52 de repère + 2 × 8 de marge + 1 de filet.
+const HAUTEUR_LIGNE: f32 = 69.0;
 const HAUTEUR_PIED: f32 = 46.0;
 const HAUTEUR_CASE: f32 = 64.0;
 const HAUTEUR_TICKET_ETROIT: f32 = 420.0;
@@ -430,32 +431,35 @@ fn ligne_du_ticket(
     };
     let largeur_nom =
         (interieur.width() - 52.0 - 16.0 - 120.0 - 16.0 - reserve_controles).max(80.0);
+    let police_nom = police_disponible(enfant.ctx(), Graisse::Moyenne, 17.0);
     zone(
         &mut enfant,
         Vec2::new(largeur_nom, 52.0),
         Layout::top_down(Align::Min),
         |ui| {
-            ui.spacing_mut().item_spacing.y = 2.0;
-            ui.add(
-                Label::new(
-                    RichText::new(nom)
-                        .font(police_disponible(ui.ctx(), Graisse::Moyenne, 17.0))
-                        .color(couleur(TEXTE)),
-                )
-                .truncate()
-                .selectable(false),
-            );
-            if let Some(detail) = detail {
+            let detail_police = FontId::proportional(14.0);
+            bloc_de_deux_lignes(ui, 52.0, 2.0, &police_nom, &detail_police, |ui| {
                 ui.add(
                     Label::new(
-                        RichText::new(detail)
-                            .size(14.0)
-                            .color(couleur(TEXTE_DISCRET)),
+                        RichText::new(nom)
+                            .font(police_nom.clone())
+                            .color(couleur(TEXTE)),
                     )
                     .truncate()
                     .selectable(false),
                 );
-            }
+                if let Some(detail) = detail {
+                    ui.add(
+                        Label::new(
+                            RichText::new(detail)
+                                .size(14.0)
+                                .color(couleur(TEXTE_DISCRET)),
+                        )
+                        .truncate()
+                        .selectable(false),
+                    );
+                }
+            });
         },
     );
     if choisie {
@@ -530,43 +534,78 @@ fn colonne_paiement(ui: &mut Ui, app: &mut Application, devis: &DevisTicket) {
     boutons_de_paiement(ui, app, actif);
 }
 
+/// La hauteur d'une ligne de texte de 16 points dans la maquette (« line-height: normal »).
+const HAUTEUR_TEXTE: f32 = 20.0;
+
 fn ligne_montant(ui: &mut Ui, libelle: &str, valeur: &str) {
-    ui.horizontal(|ui| {
-        ui.label(
-            RichText::new(libelle)
-                .size(16.0)
-                .color(couleur(TEXTE_SECONDAIRE)),
-        );
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+    zone_fixe(
+        ui,
+        Vec2::new(ui.available_width(), HAUTEUR_TEXTE),
+        Layout::left_to_right(Align::Center),
+        |ui| {
             ui.label(
-                RichText::new(valeur)
+                RichText::new(libelle)
                     .size(16.0)
                     .color(couleur(TEXTE_SECONDAIRE)),
             );
-        });
-    });
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                ui.label(
+                    RichText::new(valeur)
+                        .size(16.0)
+                        .color(couleur(TEXTE_SECONDAIRE)),
+                );
+            });
+        },
+    );
 }
 
+/// Le total en grand : 64 points gras, interlettrage de −0,02 em, sur une ligne de 64 de haut,
+/// puis l'unité en 24 points moyens et gris, à droite et sur la même ligne de base.
+///
+/// Dans la maquette (« line-height: 1 »), le texte de 1,3 em déborde de la ligne d'autant en haut
+/// qu'en bas ; egui n'a pas ce demi-interligne négatif, on décale donc le texte à la main.
 fn total_en_grand(ui: &mut Ui, devise: Devise, total: Montant) {
-    let nombre = RichText::new(devise.formater_nombre(total))
-        .font(police_disponible(ui.ctx(), Graisse::Grasse, 64.0))
-        .color(couleur(TEXTE));
-    let unite = RichText::new(devise.symbole())
-        .font(police_disponible(ui.ctx(), Graisse::Moyenne, 24.0))
-        .color(couleur(TEXTE_DISCRET));
-    zone(
-        ui,
-        Vec2::new(ui.available_width(), 76.0),
-        Layout::right_to_left(Align::BOTTOM),
-        |ui| {
-            if devise.symbole_avant() {
-                ui.label(nombre);
-                ui.label(unite);
-            } else {
-                ui.label(unite);
-                ui.label(nombre);
-            }
-        },
+    const HAUTEUR: f32 = 64.0;
+    const HAUTEUR_DU_TEXTE: f32 = 64.0 * 1.3;
+    let nombre = devise.formater_nombre(total);
+    let format_nombre = TextFormat {
+        font_id: police_disponible(ui.ctx(), Graisse::Grasse, 64.0),
+        color: couleur(TEXTE),
+        extra_letter_spacing: -0.02 * 64.0,
+        ..Default::default()
+    };
+    let format_unite = TextFormat {
+        font_id: police_disponible(ui.ctx(), Graisse::Moyenne, 24.0),
+        color: couleur(TEXTE_DISCRET),
+        ..Default::default()
+    };
+    let mut texte = LayoutJob::default();
+    if devise.symbole_avant() {
+        texte.append(devise.symbole(), 0.0, format_unite);
+        texte.append(&nombre, 0.0, format_nombre);
+    } else {
+        texte.append(&nombre, 0.0, format_nombre.clone());
+        texte.append("\u{a0}", 0.0, format_nombre);
+        texte.append(devise.symbole(), 0.0, format_unite);
+    }
+    let (rect, _) =
+        ui.allocate_exact_size(Vec2::new(ui.available_width(), HAUTEUR), Sense::hover());
+    let decalage = (HAUTEUR_DU_TEXTE - HAUTEUR) / 2.0;
+    let mut enfant = ui.new_child(
+        UiBuilder::new()
+            .max_rect(rect.translate(Vec2::new(0.0, -decalage)))
+            .layout(Layout::right_to_left(Align::Min)),
+    );
+    enfant.add(Label::new(texte).selectable(false));
+}
+
+/// Le filet sous les sous-totaux : 1 de haut, avec 4 de marge de chaque côté (en plus de l'écart).
+fn filet_du_total(ui: &mut Ui) {
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 9.0), Sense::hover());
+    ui.painter().hline(
+        rect.x_range(),
+        rect.top() + 4.5,
+        Stroke::new(1.0, couleur(FILET)),
     );
 }
 
@@ -601,16 +640,23 @@ fn carte_totaux(ui: &mut Ui, app: &Application, devis: &DevisTicket) {
                 ligne_montant(ui, &libelle_taxe(profil, taux), &devise.formater(*taxe));
             }
         }
-        ui.separator();
-        ui.label(
-            RichText::new(LIBELLE_TOTAL_GRAND)
-                .font(police_disponible(ui.ctx(), Graisse::SemiGrasse, 16.0))
-                .color(couleur(TEXTE_SECONDAIRE)),
+        filet_du_total(ui);
+        zone_fixe(
+            ui,
+            Vec2::new(ui.available_width(), HAUTEUR_TEXTE),
+            Layout::left_to_right(Align::Center),
+            |ui| {
+                ui.label(
+                    RichText::new(LIBELLE_TOTAL_GRAND)
+                        .font(police_disponible(ui.ctx(), Graisse::SemiGrasse, 16.0))
+                        .color(couleur(TEXTE_SECONDAIRE)),
+                );
+            },
         );
         total_en_grand(ui, devise, total);
         if profil == Profil::Europe {
             for (taux, taxe) in &taxes {
-                zone(
+                zone_fixe(
                     ui,
                     Vec2::new(ui.available_width(), 16.0),
                     Layout::right_to_left(Align::Center),
@@ -1048,6 +1094,21 @@ mod tests {
         assert!(peint(&textes, &articles_au_ticket(2)));
     }
 
+    /// Dans la maquette, le bloc « nom + détail » est centré en hauteur sur l'image de la ligne.
+    #[test]
+    fn le_nom_et_le_detail_d_une_ligne_sont_centres_sur_son_repere() {
+        let mut app = acheteur("ligne-centree", &[("Pain", 2)]);
+        let textes = textes_peints(&mut app, FENETRE, 1.0);
+        let rect = |texte: &str| textes.iter().find(|t| t.texte == texte).unwrap().rect;
+        let bloc_centre =
+            (rect("Pain").top() + rect(&detail_de_ligne(2, "1,20\u{a0}€")).bottom()) / 2.0;
+        let repere = rect("PA").center().y;
+        assert!(
+            (bloc_centre - repere).abs() <= 1.0,
+            "bloc centré en {bloc_centre}, repère en {repere}"
+        );
+    }
+
     #[test]
     fn une_seule_ligne_est_choisie_et_montre_moins_et_plus() {
         let mut h = harness_vente(acheteur("choix", &[("Pain", 2), ("Savon", 1)]), FENETRE);
@@ -1089,15 +1150,17 @@ mod tests {
     fn le_total_en_grand_la_tva_incluse_et_le_sous_total() {
         let mut app = acheteur("totaux", &[("Pain", 3), ("Savon", 1)]);
         let textes = textes_peints(&mut app, FENETRE, 1.0);
-        for attendu in [
-            LIBELLE_TOTAL_GRAND,
-            "6,10",
-            "€",
-            LIBELLE_SOUS_TOTAL,
-            "6,10\u{a0}€",
-        ] {
+        for attendu in [LIBELLE_TOTAL_GRAND, LIBELLE_SOUS_TOTAL, "6,10\u{a0}€"] {
             assert!(peint(&textes, attendu), "« {attendu} » n'est pas peint");
         }
+        // Le total en grand est un seul texte (« 6,10 € »), d'une ligne de 64 points : plus haut
+        // que le sous-total, qui porte les mêmes mots.
+        assert!(
+            textes
+                .iter()
+                .any(|t| t.texte == "6,10\u{a0}€" && t.rect.height() > 64.0),
+            "le total n'est pas peint en grand"
+        );
         let h = harness_vente(app, FENETRE);
         h.get_by_label("TVA 5,5\u{a0}% incluse : 0,19\u{a0}€");
         h.get_by_label("TVA 20\u{a0}% incluse : 0,42\u{a0}€");
@@ -1120,8 +1183,7 @@ mod tests {
             "$2.40",
             "Taxe 8\u{a0}%",
             "$0.19",
-            "2.59",
-            "$",
+            "$2.59",
         ] {
             assert!(peint(&textes, attendu), "« {attendu} » n'est pas peint");
         }
@@ -1360,6 +1422,26 @@ mod tests {
         app
     }
 
+    /// Les côtes de `maquette/1-vente.html` à 1366 × 768, sans remise (étape B) : la carte du total
+    /// fait 211 de haut, puis viennent Espèces (84) et Carte / Autre (72), à 12 d'écart.
+    #[test]
+    fn la_colonne_de_paiement_a_les_cotes_de_la_maquette() {
+        let mut app = app_vendeuse("cotes-colonne");
+        app.panier = vec![("Savon".to_string(), 1)]; // un seul taux de TVA : une seule ligne
+        let h = harness_fenetre(app, FENETRE);
+        let rect = |nom: &str| h.get_by_role_and_label(Role::Button, nom).rect();
+        let (especes, carte, autre) =
+            (rect(BOUTON_ESPECES), rect(BOUTON_CARTE), rect(BOUTON_AUTRE));
+        assert_eq!(
+            (especes.left(), especes.width(), especes.height()),
+            (930.0, 420.0, 84.0)
+        );
+        assert_eq!(especes.top(), 295.0, "sous la carte du total de 211");
+        assert_eq!((carte.top(), carte.height()), (391.0, 72.0));
+        assert_eq!((carte.width(), autre.width()), (204.0, 204.0));
+        assert_eq!(autre.left(), 1146.0);
+    }
+
     #[test]
     fn a_1366_par_768_l_essentiel_de_la_vente_est_a_l_ecran() {
         let h = harness_vente(ticket_de_six_lignes("ecran-defaut"), FENETRE);
@@ -1409,21 +1491,28 @@ mod tests {
     #[test]
     fn dans_une_fenetre_basse_la_colonne_de_paiement_defile_et_les_paiements_restent_atteignables()
     {
-        // La hauteur minimale : le total et les trois boutons ne tiennent plus à côté du ticket.
+        // La hauteur minimale : le total et les trois boutons ne tiennent plus à côté du ticket
+        // (le dernier, « Autre », finit à 497 sur 420).
         let taille = Vec2::new(TAILLE_FENETRE[0], TAILLE_MINIMALE[1]);
         let mut h = harness_vente(ticket_de_six_lignes("fenetre-basse"), taille);
         let ecran = Rect::from_min_size(Pos2::ZERO, taille);
-        let especes = |h: &Harness<'static, Application>| {
-            h.get_by_role_and_label(Role::Button, BOUTON_ESPECES).rect()
+        let autre = |h: &Harness<'static, Application>| {
+            h.get_by_role_and_label(Role::Button, BOUTON_AUTRE).rect()
         };
         // Hors de l'écran au départ : sinon ce test ne prouverait rien.
-        assert!(!ecran.contains_rect(especes(&h)), "{:?}", especes(&h));
-        h.get_by_role_and_label(Role::Button, BOUTON_ESPECES)
+        assert!(!ecran.contains_rect(autre(&h)), "{:?}", autre(&h));
+        h.get_by_role_and_label(Role::Button, BOUTON_AUTRE)
             .scroll_to_me();
         h.run();
-        assert!(ecran.contains_rect(especes(&h)), "{:?}", especes(&h));
-        cliquer(&mut h, BOUTON_ESPECES);
-        assert_eq!(h.state().modale, Some(Modale::Especes));
+        assert!(ecran.contains_rect(autre(&h)), "{:?}", autre(&h));
+        cliquer(&mut h, BOUTON_AUTRE);
+        assert!(matches!(
+            h.state().modale,
+            Some(Modale::Terminal {
+                moyen: Moyen::Autre,
+                ..
+            })
+        ));
     }
 
     #[test]
