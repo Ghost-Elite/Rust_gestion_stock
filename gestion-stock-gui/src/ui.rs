@@ -513,4 +513,28 @@ mod tests {
     }
 
     // ---- Ventes, réglages, prix ---------------------------------------------------------------
+
+    #[test]
+    fn a_200_pour_cent_l_historique_et_la_recherche_ne_debordent_pas_a_l_horizontale() {
+        // Texte agrandi : la largeur disponible est divisée par deux, on passe en une colonne.
+        let taille = Vec2::new(1366.0, 4000.0);
+        let largeur = taille.x / 2.0;
+        for (nom, ecran) in [
+            ("historique", Ecran::Historique),
+            ("recherche", Ecran::Recherche),
+        ] {
+            let mut app = app_avec_ventes(&format!("zoom-{nom}"));
+            app.ecran = ecran;
+            let textes = textes_peints(&mut app, taille, 2.0);
+            assert!(textes.len() > 8, "{nom} : trop peu de textes");
+            for t in &textes {
+                assert!(
+                    t.rect.left() >= -0.5 && t.rect.right() <= largeur + 0.5,
+                    "{nom} : « {} » déborde : {:?} (largeur {largeur})",
+                    t.texte,
+                    t.rect
+                );
+            }
+        }
+    }
 }

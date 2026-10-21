@@ -176,7 +176,12 @@ pub(super) fn ecran_vente(ui: &mut Ui, app: &mut Application) {
             .exact_size(LARGEUR_COLONNE_PAIEMENT + 8.0 + 16.0)
             .resizable(false)
             .show_separator_line(false)
-            .show(ui, |ui| colonne_paiement(ui, app, &devis));
+            .show(ui, |ui| {
+                // Dans une fenêtre basse, la colonne défile d'un bloc : rien n'est jamais rogné.
+                ScrollArea::vertical()
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| colonne_paiement(ui, app, &devis));
+            });
         CentralPanel::default()
             .frame(Frame::new().fill(couleur(FOND)).inner_margin(Margin {
                 left: 16,
@@ -1335,5 +1340,173 @@ mod tests {
             let textes = textes_peints(&mut app, FENETRE, 1.0);
             verifier_contrastes(&textes, &format!("{modale:?}"));
         }
+    }
+
+    // ---- Taille de fenêtre, zoom et clavier -------------------------------------------------------
+
+    /// Un ticket de six lignes, comme dans la maquette.
+    fn ticket_de_six_lignes(nom: &str) -> Application {
+        let mut etat = etat_vendeur(nom);
+        for produit in ["Riz", "Huile", "Sucre"] {
+            assert!(etat.ajouter_avec_prix(produit, "0", "2", ""));
+            assert!(etat.entree(produit, "10"));
+        }
+        let mut app = Application::nouvelle(etat);
+        app.panier = ["Pain", "Savon", "Lait", "Riz", "Huile", "Sucre"]
+            .iter()
+            .enumerate()
+            .map(|(i, n)| (n.to_string(), i as u32 % 3 + 1))
+            .collect();
+        app
+    }
+
+    #[test]
+    fn a_1366_par_768_l_essentiel_de_la_vente_est_a_l_ecran() {
+        let h = harness_vente(ticket_de_six_lignes("ecran-defaut"), FENETRE);
+        let ecran = Rect::from_min_size(Pos2::ZERO, FENETRE);
+        for (role, nom) in [
+            (Role::TextInput, CHAMP_SCAN.to_string()),
+            (Role::Button, BOUTON_ESPECES.to_string()),
+            (Role::Button, BOUTON_CARTE.to_string()),
+            (Role::Button, BOUTON_AUTRE.to_string()),
+            (
+                Role::Button,
+                fonction_nom(FONCTION_RECHERCHER, RACCOURCI_RECHERCHER),
+            ),
+            (
+                Role::Button,
+                fonction_nom(FONCTION_SUPPRIMER, RACCOURCI_SUPPRIMER),
+            ),
+            (
+                Role::Button,
+                fonction_nom(FONCTION_ANNULER, RACCOURCI_ANNULER),
+            ),
+            (Role::Button, FONCTION_MENU.to_string()),
+        ] {
+            let rect = h.get_by_role_and_label(role, &nom).rect();
+            assert!(
+                ecran.contains_rect(rect),
+                "« {nom} » est hors de l'écran : {rect:?} hors de {ecran:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn dans_une_fenetre_etroite_le_scan_passe_avant_le_ticket_et_les_paiements() {
+        let taille = Vec2::new(640.0, 2400.0);
+        let h = harness_vente(ticket_de_six_lignes("etroit-ordre"), taille);
+        let scan = h.get_by_role_and_label(Role::TextInput, CHAMP_SCAN).rect();
+        let premiere_ligne = h.get_by_label("Pain").rect();
+        let especes = h.get_by_role_and_label(Role::Button, BOUTON_ESPECES).rect();
+        let menu = h.get_by_role_and_label(Role::Button, FONCTION_MENU).rect();
+        assert!(scan.top() < premiere_ligne.top());
+        assert!(premiere_ligne.top() < especes.top());
+        assert!(especes.top() < menu.top());
+        let ecran = Rect::from_min_size(Pos2::ZERO, taille);
+        assert!(ecran.contains_rect(menu), "{menu:?}");
+    }
+
+    #[test]
+    fn dans_une_fenetre_basse_la_colonne_de_paiement_defile_et_les_paiements_restent_atteignables()
+    {
+        // La hauteur minimale : le total et les trois boutons ne tiennent plus à côté du ticket.
+        let taille = Vec2::new(TAILLE_FENETRE[0], TAILLE_MINIMALE[1]);
+        let mut h = harness_vente(ticket_de_six_lignes("fenetre-basse"), taille);
+        let ecran = Rect::from_min_size(Pos2::ZERO, taille);
+        let especes = |h: &Harness<'static, Application>| {
+            h.get_by_role_and_label(Role::Button, BOUTON_ESPECES).rect()
+        };
+        // Hors de l'écran au départ : sinon ce test ne prouverait rien.
+        assert!(!ecran.contains_rect(especes(&h)), "{:?}", especes(&h));
+        h.get_by_role_and_label(Role::Button, BOUTON_ESPECES)
+            .scroll_to_me();
+        h.run();
+        assert!(ecran.contains_rect(especes(&h)), "{:?}", especes(&h));
+        cliquer(&mut h, BOUTON_ESPECES);
+        assert_eq!(h.state().modale, Some(Modale::Especes));
+    }
+
+    #[test]
+    fn la_barre_de_fonctions_passe_sur_deux_lignes_en_fenetre_etroite() {
+        let taille = Vec2::new(520.0, 2400.0);
+        let h = harness_vente(app_vendeuse("barre-etroite"), taille);
+        let noms = [
+            fonction_nom(FONCTION_RECHERCHER, RACCOURCI_RECHERCHER),
+            fonction_nom(FONCTION_SUPPRIMER, RACCOURCI_SUPPRIMER),
+            fonction_nom(FONCTION_ANNULER, RACCOURCI_ANNULER),
+            FONCTION_MENU.to_string(),
+        ];
+        let rects: Vec<Rect> = noms
+            .iter()
+            .map(|n| h.get_by_role_and_label(Role::Button, n).rect())
+            .collect();
+        let ecran = Rect::from_min_size(Pos2::ZERO, taille);
+        for (nom, rect) in noms.iter().zip(&rects) {
+            assert!(ecran.contains_rect(*rect), "« {nom} » : {rect:?}");
+            assert!(rect.height() >= 44.0, "« {nom} » trop basse : {rect:?}");
+        }
+        assert_eq!(
+            rects[0].top(),
+            rects[1].top(),
+            "une première rangée de deux"
+        );
+        assert_eq!(rects[2].top(), rects[3].top(), "une seconde rangée de deux");
+        assert!(rects[2].top() > rects[0].bottom());
+    }
+
+    #[test]
+    fn a_200_pour_cent_la_vente_ne_deborde_pas_a_l_horizontale() {
+        // Texte agrandi : la largeur disponible est divisée par deux, on passe en une colonne.
+        let taille = Vec2::new(1366.0, 4000.0);
+        let largeur = taille.x / 2.0;
+        for (nom, mut app) in [
+            ("avec ticket", ticket_de_six_lignes("zoom-ticket")),
+            ("avec blocages", app_vendeuse_avec_blocages("zoom-blocages")),
+        ] {
+            let textes = textes_peints(&mut app, taille, 2.0);
+            assert!(textes.len() > 8, "{nom} : trop peu de textes");
+            for t in &textes {
+                assert!(
+                    t.rect.left() >= -0.5 && t.rect.right() <= largeur + 0.5,
+                    "{nom} : « {} » déborde : {:?} (largeur {largeur})",
+                    t.texte,
+                    t.rect
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn on_met_un_produit_au_ticket_puis_on_paie_sans_la_souris() {
+        let mut h = harness_vente(app_vendeuse("clavier"), FENETRE);
+        // Le champ de scan a déjà le focus : on tape le nom puis Entrée.
+        h.get_by_label(CHAMP_SCAN).type_text("pain");
+        h.run();
+        h.key_press(Key::Enter);
+        h.run();
+        assert_eq!(h.state().panier, [("Pain".to_string(), 1)]);
+        // On atteint « Carte » au clavier et on l'active avec la barre d'espace.
+        h.get_by_role_and_label(Role::Button, BOUTON_CARTE).focus();
+        h.run();
+        h.key_press(Key::Space);
+        h.run();
+        assert!(matches!(
+            h.state().modale,
+            Some(Modale::Terminal {
+                moyen: Moyen::Carte,
+                refuse: false
+            })
+        ));
+        // Puis « Paiement accepté » avec Entrée : la vente est enregistrée.
+        h.get_by_role_and_label(Role::Button, BOUTON_ACCEPTE)
+            .focus();
+        h.run();
+        h.key_press(Key::Enter);
+        h.run();
+        assert_eq!(nombre_de_pieces(&h), 1);
+        assert!(matches!(
+            h.state().modale,
+            Some(Modale::VenteTerminee { .. })
+        ));
     }
 }
