@@ -236,11 +236,81 @@ pub const MENTION_NON_CERTIFIE: &str =
     "Ticket non fiscal : ce programme n'est pas une caisse certifiée.";
 pub const LIBELLE_RENDU: &str = "Rendu de monnaie";
 
-pub const SECTION_VENTES: &str = "Journal des ventes";
 pub const AUCUNE_VENTE: &str = "Aucune vente enregistrée.";
-pub const BOUTON_ANNULER_VENTE: &str = "Annuler la vente";
-pub const BOUTON_CONFIRMER_ANNULATION: &str = "Confirmer l'annulation";
-pub const BOUTON_GARDER_VENTE: &str = "Garder la vente";
+
+// ---- L'historique des tickets -------------------------------------------------------------------
+pub const HISTORIQUE_TITRE: &str = "Ventes du jour";
+pub const HISTORIQUE_TITRE_RECHERCHE: &str = "Tickets trouvés";
+pub const CHAMP_TICKET: &str = "N° de ticket";
+pub const AUCUNE_VENTE_JOUR: &str = "Aucune vente ce jour.";
+pub const AUCUN_TICKET: &str = "Aucun ticket ne porte ce numéro.";
+pub const AUCUN_TICKET_A_MONTRER: &str = "Aucun ticket à afficher.";
+pub const JOUR_PRECEDENT: &str = "Jour précédent";
+pub const JOUR_SUIVANT: &str = "Jour suivant";
+pub const STATUT_PAYEE: &str = "Payée";
+pub const STATUT_REMBOURSEE: &str = "Remboursée";
+pub const STATUT_REMBOURSEMENT: &str = "Remboursement";
+pub const BOUTON_REMBOURSER: &str = "Rembourser";
+pub const LIBELLE_TOTAL_TICKET: &str = "Total";
+
+/// `Ventes du 14/11/2023`, depuis le jour `2023-11-14`.
+pub fn historique_titre_jour(iso: &str) -> String {
+    let mut parties = iso.split('-');
+    match (parties.next(), parties.next(), parties.next()) {
+        (Some(annee), Some(mois), Some(jour)) => format!("Ventes du {jour}/{mois}/{annee}"),
+        _ => format!("Ventes du {iso}"),
+    }
+}
+
+pub fn nom_du_statut(statut: crate::etat::StatutPiece) -> &'static str {
+    use crate::etat::StatutPiece;
+    match statut {
+        StatutPiece::Payee => STATUT_PAYEE,
+        StatutPiece::Remboursee => STATUT_REMBOURSEE,
+        StatutPiece::Remboursement => STATUT_REMBOURSEMENT,
+    }
+}
+
+/// Le nom d'une ligne de l'historique pour les lecteurs d'écran.
+pub fn nom_de_ligne(
+    ticket: &str,
+    heure: &str,
+    moyen: &str,
+    total: &str,
+    statut: crate::etat::StatutPiece,
+) -> String {
+    format!(
+        "Ticket {ticket}, {heure}, {moyen}, {total}, {}",
+        nom_du_statut(statut)
+    )
+}
+
+/// `23:13 · Carte · 4 articles · Payée`.
+pub fn meta_du_ticket(
+    heure: &str,
+    moyen: &str,
+    articles: u32,
+    statut: crate::etat::StatutPiece,
+) -> String {
+    format!(
+        "{heure} · {moyen} · {} · {}",
+        articles_au_ticket(articles),
+        nom_du_statut(statut)
+    )
+}
+
+pub fn rembourser_titre(ticket: &str) -> String {
+    format!("Rembourser le ticket {ticket} ?")
+}
+
+pub fn rembourser_texte(total: &str) -> String {
+    format!("Montant remboursé : {total}, par le même moyen de paiement.")
+}
+
+/// Le nom du bouton qui ouvre la fenêtre de remboursement d'un ticket.
+pub fn rembourser_le_ticket(ticket: &str) -> String {
+    format!("Rembourser le ticket {ticket}")
+}
 pub const JOURNAL_ALTERE_SUITE: &str = "Les ventes et les annulations sont bloquées ; le stock reste utilisable. Restaurez une copie du fichier de données pour vendre à nouveau.";
 
 pub const SECTION_REGLAGES: &str = "Réglages de la caisse";
@@ -363,24 +433,6 @@ pub fn libelle_taxe(profil: Profil, taux: &str) -> String {
 /// Un stock sous le seuil d'alerte s'écrit aussi en toutes lettres sur la tuile.
 pub fn stock_bas(quantite: u32) -> String {
     format!("{quantite} en stock (bas)")
-}
-
-pub fn annuler_la_vente(numero: u64) -> String {
-    format!("Annuler la vente n° {numero}")
-}
-
-pub fn confirmation_annulation(numero: u64, total: &str) -> String {
-    format!(
-        "Annuler la vente n° {numero} ({total}) ? Le stock sera remis et une écriture d'annulation sera ajoutée au journal : la vente reste visible, rien n'est effacé."
-    )
-}
-
-pub fn titre_de_piece(numero: u64, libelle: &str) -> String {
-    format!("n° {numero} : {libelle}")
-}
-
-pub fn detail_de_piece(quand: &str, moyen: &str) -> String {
-    format!("{quand} · {moyen}")
 }
 
 pub fn prix_court(prix: &str) -> String {

@@ -181,7 +181,7 @@ pub(crate) fn est_grise(h: &Harness<'static, Application>, libelle: &str) -> boo
 }
 
 pub(crate) fn nombre_de_pieces(h: &Harness<'static, Application>) -> usize {
-    h.state().etat.as_ref().unwrap().pieces_recentes(100).len()
+    h.state().etat.as_ref().unwrap().historique_ventes().len()
 }
 
 /// Sans les textes d'un contrôle grisé : les WCAG les dispensent de contraste (la raison est
@@ -260,4 +260,21 @@ pub(crate) fn scanner(h: &mut Harness<'static, Application>, texte: &str) {
     saisir(h, CHAMP_SCAN, texte);
     h.key_press(eframe::egui::Key::Enter);
     h.run();
+}
+
+/// Une boutique dont l'horloge se règle de l'extérieur : le premier jour est le 14/11/2023
+/// (23 h 13, heure locale) ; `horloge.set(utc + 86_400)` passe au lendemain. Pain : 1,20 €, 20
+/// en stock.
+pub(crate) fn etat_sur_deux_jours(nom: &str) -> (Etat, std::rc::Rc<std::cell::Cell<i64>>) {
+    let utc = std::rc::Rc::new(std::cell::Cell::new(FIXE.utc));
+    let horloge = std::rc::Rc::clone(&utc);
+    let mut etat = Etat::ouvrir(chemin_temp(nom))
+        .unwrap()
+        .avec_horloge(move || Horodatage {
+            utc: horloge.get(),
+            decalage_minutes: FIXE.decalage_minutes,
+        });
+    assert!(etat.ajouter_avec_prix("Pain", "0", "1,20", ""));
+    assert!(etat.entree("Pain", "20"));
+    (etat, utc)
 }

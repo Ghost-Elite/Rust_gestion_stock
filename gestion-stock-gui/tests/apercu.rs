@@ -188,15 +188,18 @@ fn apercu_vente_etroite() {
 
 #[test]
 #[ignore = "outil de design : lancer à la main"]
-fn apercu_ventes() {
-    let mut app = vente_en_cours("ventes");
+fn apercu_historique() {
+    let mut app = vente_en_cours("historique");
     let etat = app.etat.as_mut().unwrap();
-    assert!(etat.encaisser(&app.panier, Moyen::Especes, "20"));
+    assert!(etat.encaisser(&app.panier, Moyen::Especes, "50"));
     assert!(etat.encaisser(&[("Lait concentré".to_string(), 3)], Moyen::Carte, ""));
+    assert!(etat.encaisser(&[("Riz parfumé 5kg".to_string(), 1)], Moyen::Autre, ""));
+    assert!(etat.annuler(3));
+    etat.effacer_ticket();
     app.panier.clear();
     app.ecran = Ecran::Historique;
-    app.annulation_en_attente = Some(1);
-    capturer("ventes", Vec2::new(1100.0, 720.0), app);
+    app.historique.choisi = Some(1);
+    capturer("historique", Vec2::new(1366.0, 768.0), app);
 }
 
 #[test]

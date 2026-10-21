@@ -49,18 +49,23 @@ pub enum Reglement {
     Rendu(Montant),
 }
 
-/// Une ligne de la liste des ventes, déjà écrite pour l'affichage.
+/// Une ligne de l'historique des tickets, déjà écrite pour l'affichage.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LignePiece {
+pub struct LigneHistorique {
+    /// Le numéro du journal.
     pub numero: u64,
-    /// La date et l'heure locales : `14/11/2023 23:13`.
-    pub quand: String,
-    /// `Vente`, ou `Annulation de la vente n° 3`.
-    pub libelle: String,
+    /// Le numéro montré à la personne : `01-0186`.
+    pub ticket: String,
+    /// Le jour local, `2023-11-14` : il sert à regrouper les tickets par journée.
+    pub jour: String,
+    /// L'heure locale : `23:13`.
+    pub heure: String,
+    pub moyen: Moyen,
+    /// Le total, signé : négatif pour un remboursement.
     pub total: String,
-    pub moyen: String,
-    /// Vrai pour une vente qui n'a pas encore été annulée.
-    pub annulable: bool,
+    pub statut: StatutPiece,
+    /// Le nombre d'articles (la somme des quantités).
+    pub articles: u32,
 }
 
 /// Où en est un ticket du journal : payé, remboursé, ou l'écriture de remboursement elle-même.
@@ -138,14 +143,6 @@ pub struct Etat {
 }
 
 const JOURNAL_BLOQUE: &str = "Le journal de caisse a été modifié en dehors du programme : les ventes sont bloquées. Le stock reste utilisable ; restaurez une copie du fichier de données pour vendre à nouveau.";
-
-fn libelle_moyen(moyen: Moyen) -> &'static str {
-    match moyen {
-        Moyen::Especes => "Espèces",
-        Moyen::Carte => "Carte",
-        Moyen::Autre => "Autre",
-    }
-}
 
 fn libelle_profil(profil: Profil) -> &'static str {
     match profil {
@@ -595,7 +592,10 @@ impl Etat {
         let mut annulation = None;
         let reussi = self.appliquer(|stock| {
             annulation = Some(stock.annuler(numero, quand)?.numero);
-            Ok(format!("Vente n° {numero} annulée : stock remis."))
+            Ok(format!(
+                "Ticket {} remboursé : stock remis.",
+                numero_de_ticket(numero)
+            ))
         });
         if reussi {
             self.ticket = annulation;
@@ -702,36 +702,41 @@ impl Etat {
         })
     }
 
-    /// Les pièces du journal, de la plus récente à la plus ancienne.
-    pub fn pieces_recentes(&self, limite: usize) -> Vec<LignePiece> {
+    /// Tous les tickets du journal, du plus récent au plus ancien.
+    pub fn historique_ventes(&self) -> Vec<LigneHistorique> {
         let devise = self.stock.reglages().devise;
-        let pieces = self.stock.pieces();
-        pieces
+        self.stock
+            .pieces()
             .iter()
             .rev()
-            .take(limite)
             .map(|piece| {
-                let (libelle, annulable) = match piece.genre {
-                    GenrePiece::Vente => (
-                        "Vente".to_string(),
-                        !pieces
-                            .iter()
-                            .any(|p| p.genre == GenrePiece::Annulation { de: piece.numero }),
-                    ),
-                    GenrePiece::Annulation { de } => {
-                        (format!("Annulation de la vente n° {de}"), false)
-                    }
-                };
-                LignePiece {
+                let local = piece.horodatage.local();
+                LigneHistorique {
                     numero: piece.numero,
-                    quand: piece.horodatage.local().en_francais(),
-                    libelle,
+                    ticket: numero_de_ticket(piece.numero),
+                    jour: local.jour_iso(),
+                    heure: format!("{:02}:{:02}", local.heure, local.minute),
+                    moyen: piece.moyen,
                     total: devise.formater(piece.total),
-                    moyen: libelle_moyen(piece.moyen).to_string(),
-                    annulable,
+                    statut: self.statut_de(piece),
+                    articles: piece.lignes.iter().map(|l| l.quantite).sum(),
                 }
             })
             .collect()
+    }
+
+    /// Les jours (locaux, `2023-11-14`) où le journal a des pièces, sans doublon, du plus ancien
+    /// au plus récent.
+    pub fn jours_avec_pieces(&self) -> Vec<String> {
+        let mut jours: Vec<String> = self
+            .stock
+            .pieces()
+            .iter()
+            .map(|piece| piece.horodatage.local().jour_iso())
+            .collect();
+        jours.sort();
+        jours.dedup();
+        jours
     }
 
     /// L'état du journal de caisse : `Err` avec le message à afficher s'il a été modifié.
@@ -1123,7 +1128,7 @@ mod tests {
         assert_eq!(e.derniere_piece().unwrap().numero, 1);
         // Le fichier a été écrit : on retrouve la vente en rouvrant.
         let relu = Etat::ouvrir(e.chemin().to_path_buf()).unwrap();
-        assert_eq!(relu.pieces_recentes(10).len(), 1);
+        assert_eq!(relu.historique_ventes().len(), 1);
         assert_eq!(ligne(&relu, "Pain").quantite, 7);
         assert_eq!(relu.integrite(), Ok(()));
     }
@@ -1134,7 +1139,7 @@ mod tests {
         assert!(e.encaisser(&panier(&[("Pain", 3)]), Moyen::Especes, "5"));
         assert_eq!(e.derniere_piece().unwrap().rendu, Montant(140));
 
-        let avant = e.pieces_recentes(10).len();
+        let avant = e.historique_ventes().len();
         assert!(!e.encaisser(&panier(&[("Pain", 3)]), Moyen::Especes, "2"));
         assert!(
             matches!(&e.retour, Some(Retour::Erreur(m)) if m.contains("3,60\u{a0}€") && m.contains("2,00\u{a0}€")),
@@ -1142,7 +1147,7 @@ mod tests {
             e.retour
         );
         assert_eq!(ligne(&e, "Pain").quantite, 7);
-        assert_eq!(e.pieces_recentes(10).len(), avant);
+        assert_eq!(e.historique_ventes().len(), avant);
     }
 
     #[test]
@@ -1161,7 +1166,7 @@ mod tests {
             e.retour
         );
         assert_eq!(ligne(&e, "Pain").quantite, 10);
-        assert!(e.pieces_recentes(10).is_empty());
+        assert!(e.historique_ventes().is_empty());
     }
 
     #[test]
@@ -1186,48 +1191,82 @@ mod tests {
     }
 
     #[test]
-    fn annuler_remet_le_stock_et_ajoute_une_ligne_aux_pieces_recentes() {
+    fn annuler_remet_le_stock_et_ajoute_une_ecriture_inverse_a_l_historique() {
         let mut e = etat_vendeur("annulation");
         assert!(e.encaisser(&panier(&[("Pain", 3)]), Moyen::Carte, ""));
         assert!(e.annuler(1));
         assert_eq!(
             e.retour,
-            Some(Retour::Succes("Vente n° 1 annulée : stock remis.".into()))
+            Some(Retour::Succes(
+                "Ticket 01-0001 remboursé : stock remis.".into()
+            ))
         );
         assert_eq!(ligne(&e, "Pain").quantite, 10);
         assert_eq!(
             e.derniere_piece().unwrap().genre,
             GenrePiece::Annulation { de: 1 }
         );
-        let pieces = e.pieces_recentes(10);
-        assert_eq!(pieces[0].libelle, "Annulation de la vente n° 1");
-        assert!(!pieces[0].annulable);
-        assert_eq!(pieces[1].libelle, "Vente");
-        assert!(!pieces[1].annulable, "une vente déjà annulée ne l'est plus");
+        let historique = e.historique_ventes();
+        assert_eq!(historique[0].statut, StatutPiece::Remboursement);
+        assert_eq!(historique[0].total, "-3,60\u{a0}€");
+        assert_eq!(historique[1].statut, StatutPiece::Remboursee);
         assert!(!e.annuler(1));
         assert!(matches!(&e.retour, Some(Retour::Erreur(m)) if m.contains("déjà été annulée")));
     }
 
     #[test]
-    fn les_pieces_recentes_sont_les_plus_recentes_d_abord_et_bien_ecrites() {
-        let mut e = etat_vendeur("pieces");
+    fn l_historique_est_du_plus_recent_au_plus_ancien_et_bien_ecrit() {
+        let mut e = etat_vendeur("historique-des-tickets");
         assert!(e.encaisser(&panier(&[("Pain", 3)]), Moyen::Carte, ""));
         assert!(e.encaisser(&panier(&[("Savon", 1)]), Moyen::Especes, "5"));
-        let pieces = e.pieces_recentes(10);
+        assert!(e.annuler(2));
+        let h = e.historique_ventes();
+        assert_eq!(h.len(), 3);
         assert_eq!(
-            pieces[1],
-            LignePiece {
+            h[2],
+            LigneHistorique {
                 numero: 1,
-                quand: "14/11/2023 23:13".into(),
-                libelle: "Vente".into(),
+                ticket: "01-0001".into(),
+                jour: "2023-11-14".into(),
+                heure: "23:13".into(),
+                moyen: Moyen::Carte,
                 total: "3,60\u{a0}€".into(),
-                moyen: "Carte".into(),
-                annulable: true
+                statut: StatutPiece::Payee,
+                articles: 3,
             }
         );
-        assert_eq!((pieces[0].numero, pieces[0].moyen.as_str()), (2, "Espèces"));
-        assert_eq!(e.pieces_recentes(1).len(), 1);
-        assert_eq!(e.pieces_recentes(1)[0].numero, 2);
+        let statuts: Vec<(u64, StatutPiece)> = h.iter().map(|l| (l.numero, l.statut)).collect();
+        assert_eq!(
+            statuts,
+            [
+                (3, StatutPiece::Remboursement),
+                (2, StatutPiece::Remboursee),
+                (1, StatutPiece::Payee)
+            ]
+        );
+    }
+
+    #[test]
+    fn les_jours_avec_pieces_sont_distincts_et_croissants() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+        let utc = Rc::new(Cell::new(1_700_000_000_i64));
+        let horloge = Rc::clone(&utc);
+        let mut e = Etat::ouvrir(chemin_temp("jours"))
+            .unwrap()
+            .avec_horloge(move || Horodatage {
+                utc: horloge.get(),
+                decalage_minutes: 60,
+            });
+        assert!(e.ajouter_avec_prix("Pain", "0", "1,20", ""));
+        assert!(e.entree("Pain", "10"));
+        assert!(e.jours_avec_pieces().is_empty());
+        assert!(e.encaisser(&panier(&[("Pain", 1)]), Moyen::Carte, ""));
+        assert!(e.encaisser(&panier(&[("Pain", 1)]), Moyen::Carte, ""));
+        utc.set(1_700_000_000 + 86_400); // le lendemain, 15/11 à 23 h 13
+        assert!(e.encaisser(&panier(&[("Pain", 1)]), Moyen::Carte, ""));
+        assert_eq!(e.jours_avec_pieces(), ["2023-11-14", "2023-11-15"]);
+        assert_eq!(e.jour_courant(), "2023-11-15");
     }
 
     #[test]
@@ -1245,7 +1284,7 @@ mod tests {
             b.retour
         );
         let disque = Etat::ouvrir(a.chemin().to_path_buf()).unwrap();
-        assert_eq!(disque.pieces_recentes(10).len(), 1);
+        assert_eq!(disque.historique_ventes().len(), 1);
         assert_eq!(ligne(&disque, "Pain").quantite, 9);
     }
 

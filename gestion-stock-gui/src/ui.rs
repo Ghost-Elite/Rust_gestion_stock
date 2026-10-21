@@ -8,7 +8,7 @@
 //! couleur d'accent, des puces pour les états, de l'espace. Les couleurs viennent toutes de
 //! `palette`, où leur contraste est vérifié par des tests.
 
-use crate::etat::{Etat, LignePiece, LigneProduit, Resume, Retour, chemin_complet};
+use crate::etat::{Etat, LigneProduit, Resume, Retour, chemin_complet};
 use crate::palette::{
     ACCENT, ACCENT_DOUX, ALERTE_FOND, ALERTE_TEXTE, AVERTISSEMENT_TEXTE, ENTETE_FOND, ENTETE_TEXTE,
     FILET, FOND, SUCCES_FOND, SUCCES_TEXTE, SURFACE, TEXTE, couleur,
@@ -17,7 +17,7 @@ use crate::police::{Graisse, famille_disponible};
 use crate::textes::*;
 use eframe::egui::{
     self, Align, Align2, Button, CentralPanel, CornerRadius, Frame, Id, Layout, Margin, Panel,
-    RichText, ScrollArea, Stroke, Ui, Vec2, WidgetInfo, WidgetType,
+    RichText, ScrollArea, Stroke, Ui, Vec2,
 };
 use gestion_stock::monnaie::Devise;
 use gestion_stock::reglages::Profil;
@@ -29,6 +29,7 @@ mod composants;
 mod entete;
 #[cfg(test)]
 mod essais;
+mod historique;
 mod paiement;
 mod recherche;
 mod ticket;
@@ -89,6 +90,17 @@ pub enum Modale {
     VenteTerminee {
         ticket_visible: bool,
     },
+    /// La demande de remboursement d'un ticket (par son numéro du journal).
+    Rembourser(u64),
+}
+
+/// Ce que l'historique des tickets a en mémoire : le texte du champ « N° de ticket », le jour
+/// affiché (`None` : aujourd'hui) et le ticket choisi (par son numéro du journal).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct EtatHistorique {
+    pub filtre: String,
+    pub jour: Option<String>,
+    pub choisi: Option<u64>,
 }
 
 /// Un message de quelques secondes, en bas de l'écran. `depuis` est l'heure d'egui du premier
@@ -140,8 +152,8 @@ pub struct Application {
     /// Ce que le client a donné, tel que tapé (pour un paiement en espèces).
     pub saisie_recu: String,
     pub recherche_vente: String,
-    /// La vente que l'on s'apprête à annuler (en attente de confirmation).
-    pub annulation_en_attente: Option<u64>,
+    /// L'historique des tickets : filtre, jour affiché, ticket choisi.
+    pub historique: EtatHistorique,
     /// `None` : on montre les réglages enregistrés.
     pub reglages_saisis: Option<BrouillonReglages>,
     /// Le prix et le taux du formulaire « Ajouter un produit ».
@@ -256,7 +268,7 @@ pub fn dessiner(ui: &mut Ui, app: &mut Application) {
     match app.ecran {
         Ecran::Vente => vente::ecran_vente(ui, app),
         Ecran::Recherche => recherche::ecran_recherche(ui, app),
-        Ecran::Historique => page(ui, 900.0, |ui| ecran_ventes(ui, app)),
+        Ecran::Historique => historique::ecran_historique(ui, app),
         Ecran::Stock => ecran_stock(ui, app),
         Ecran::Reglages => page(ui, 640.0, |ui| ecran_reglages(ui, app)),
     }
@@ -270,6 +282,9 @@ pub fn dessiner(ui: &mut Ui, app: &mut Application) {
         }
         Some(Modale::VenteTerminee { ticket_visible }) => {
             paiement::fenetre_vente_terminee(ui.ctx(), app, ticket_visible);
+        }
+        Some(Modale::Rembourser(numero)) => {
+            historique::fenetre_remboursement(ui.ctx(), app, numero)
         }
         None => {}
     }
@@ -738,119 +753,6 @@ fn suppression(ui: &mut Ui, app: &mut Application, ligne: &LigneProduit) {
     } else if bouton(ui, BOUTON_SUPPRIMER, Style::Danger, true).clicked() {
         app.confirmer_suppression = true;
     }
-}
-
-// ---- Le journal des ventes ----------------------------------------------------------------------
-
-/// Combien de pièces on montre : les plus récentes. Le journal, lui, garde tout.
-const PIECES_AFFICHEES: usize = 50;
-/// La place réservée, à droite d'une ligne du journal, au total et au bouton d'annulation.
-const LARGEUR_ACTIONS_VENTE: f32 = 280.0;
-
-enum ActionVente {
-    Demander(u64),
-    Confirmer(u64),
-    Garder,
-}
-
-fn ecran_ventes(ui: &mut Ui, app: &mut Application) {
-    let Some(etat) = &app.etat else { return };
-    if let Err(message) = etat.integrite() {
-        bandeau_alerte(ui, &journal_altere(&message));
-        ui.add_space(8.0);
-    }
-    carte(ui, |ui| liste_des_ventes(ui, app));
-}
-
-fn liste_des_ventes(ui: &mut Ui, app: &mut Application) {
-    titre_de_carte(ui, SECTION_VENTES);
-    let Some(etat) = &app.etat else { return };
-    let pieces = etat.pieces_recentes(PIECES_AFFICHEES);
-    if pieces.is_empty() {
-        discret(ui, AUCUNE_VENTE);
-        return;
-    }
-    let integre = etat.integrite().is_ok();
-    let mut action = None;
-    for (i, piece) in pieces.iter().enumerate() {
-        if i > 0 {
-            ui.separator();
-        }
-        let confirmation = app.annulation_en_attente == Some(piece.numero);
-        if let Some(a) = ligne_de_piece(ui, piece, confirmation, integre) {
-            action = Some(a);
-        }
-    }
-    match action {
-        Some(ActionVente::Demander(numero)) => app.annulation_en_attente = Some(numero),
-        Some(ActionVente::Garder) => app.annulation_en_attente = None,
-        Some(ActionVente::Confirmer(numero)) => {
-            if let Some(etat) = app.etat.as_mut() {
-                etat.annuler(numero);
-            }
-            app.annulation_en_attente = None;
-        }
-        None => {}
-    }
-}
-
-/// Une pièce du journal. Annuler demande toujours une confirmation, comme supprimer un produit :
-/// le premier clic ne change rien.
-fn ligne_de_piece(
-    ui: &mut Ui,
-    piece: &LignePiece,
-    confirmation: bool,
-    integre: bool,
-) -> Option<ActionVente> {
-    let mut action = None;
-    ui.horizontal(|ui| {
-        let largeur =
-            (ui.available_width() - LARGEUR_ACTIONS_VENTE - ui.spacing().item_spacing.x).max(120.0);
-        ui.allocate_ui_with_layout(
-            Vec2::new(largeur, 0.0),
-            Layout::top_down(Align::Min),
-            |ui| {
-                ui.set_width(largeur);
-                ui.label(gras(
-                    ui,
-                    &titre_de_piece(piece.numero, &piece.libelle),
-                    16.0,
-                ));
-                discret(ui, &detail_de_piece(&piece.quand, &piece.moyen));
-            },
-        );
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            if piece.annulable && !confirmation {
-                let annuler = bouton(ui, BOUTON_ANNULER_VENTE, Style::Secondaire, integre);
-                annuler.widget_info(|| {
-                    WidgetInfo::labeled(WidgetType::Button, integre, annuler_la_vente(piece.numero))
-                });
-                if annuler.clicked() {
-                    action = Some(ActionVente::Demander(piece.numero));
-                }
-            }
-            ui.label(gras(ui, &piece.total, 17.0));
-        });
-    });
-    if confirmation && piece.annulable {
-        ui.label(confirmation_annulation(piece.numero, &piece.total));
-        ui.horizontal_wrapped(|ui| {
-            if bouton(
-                ui,
-                BOUTON_CONFIRMER_ANNULATION,
-                Style::Confirmation,
-                integre,
-            )
-            .clicked()
-            {
-                action = Some(ActionVente::Confirmer(piece.numero));
-            }
-            if bouton(ui, BOUTON_GARDER_VENTE, Style::Secondaire, true).clicked() {
-                action = Some(ActionVente::Garder);
-            }
-        });
-    }
-    action
 }
 
 // ---- Les réglages --------------------------------------------------------------------------------
@@ -1426,80 +1328,6 @@ mod tests {
     // ---- Ventes, réglages, prix ---------------------------------------------------------------
 
     #[test]
-    fn la_liste_des_ventes_montre_les_pieces_et_permet_d_annuler_avec_confirmation() {
-        let mut h = harness_vente(app_avec_ventes("liste-ventes"), FENETRE);
-        let (vente1, vente2) = (titre_de_piece(1, "Vente"), titre_de_piece(2, "Vente"));
-        // La plus récente d'abord.
-        assert!(h.get_by_label(&vente2).rect().top() < h.get_by_label(&vente1).rect().top());
-        h.get_by_label(&detail_de_piece("14/11/2023 23:13", "Carte"));
-        h.get_by_label(&detail_de_piece("14/11/2023 23:13", "Espèces"));
-        h.get_by_label("3,60\u{a0}€");
-        h.get_by_label("2,50\u{a0}€");
-
-        // Première demande : on demande confirmation, rien n'est annulé.
-        cliquer(&mut h, &annuler_la_vente(1));
-        h.get_by_label(&confirmation_annulation(1, "3,60\u{a0}€"));
-        assert_eq!(nombre_de_pieces(&h), 2);
-        cliquer(&mut h, BOUTON_GARDER_VENTE);
-        assert!(
-            h.query_by_label_contains("Annuler la vente n° 1 (")
-                .is_none()
-        );
-        assert_eq!(nombre_de_pieces(&h), 2);
-        assert_eq!(quantite_en_stock(&h, "Pain"), 7);
-
-        cliquer(&mut h, &annuler_la_vente(1));
-        cliquer(&mut h, BOUTON_CONFIRMER_ANNULATION);
-        // Une écriture inverse s'ajoute, le stock est remis, la vente reste visible.
-        assert_eq!(nombre_de_pieces(&h), 3);
-        h.get_by_label(&titre_de_piece(3, "Annulation de la vente n° 1"));
-        h.get_by_label(&vente1);
-        assert_eq!(quantite_en_stock(&h, "Pain"), 10);
-        assert!(h.state().annulation_en_attente.is_none());
-        h.get_by_label_contains("Vente n° 1 annulée : stock remis.");
-        // Plus de bouton pour la vente déjà annulée ni pour l'annulation ; l'autre reste annulable.
-        for numero in [1, 3] {
-            let libelle = annuler_la_vente(numero);
-            assert!(h.query_by_role_and_label(Role::Button, &libelle).is_none());
-        }
-        h.get_by_role_and_label(Role::Button, &annuler_la_vente(2));
-        // L'annulation ne laisse pas un ticket de vente sur l'écran de vente.
-        cliquer(&mut h, BOUTON_RETOUR_VENTE);
-        assert_eq!(h.state().ecran, Ecran::Vente);
-        h.get_by_label(TICKET_VIDE_TITRE);
-    }
-
-    #[test]
-    fn sans_vente_la_liste_le_dit() {
-        let mut app = app_vendeuse("aucune-vente");
-        app.ecran = Ecran::Historique;
-        let h = harness_vente(app, FENETRE);
-        h.get_by_label(AUCUNE_VENTE);
-    }
-
-    #[test]
-    fn un_journal_altere_affiche_un_bandeau_et_grise_encaisser_et_annuler() {
-        let mut app = app_journal_altere("altere-ui");
-        app.ecran = Ecran::Historique;
-        let mut h = harness_vente(app, FENETRE);
-        h.get_by_label_contains("Le journal de caisse a été modifié");
-        h.get_by_label_contains("Les ventes et les annulations sont bloquées");
-        assert!(est_grise(&h, &annuler_la_vente(1)));
-
-        // Même constat sur l'écran de vente : on peut remplir un ticket, pas payer.
-        cliquer(&mut h, BOUTON_RETOUR_VENTE);
-        scanner(&mut h, "savon");
-        h.get_by_label_contains("Le journal de caisse a été modifié");
-        for nom in [BOUTON_ESPECES, BOUTON_CARTE, BOUTON_AUTRE] {
-            assert!(est_grise(&h, nom), "{nom} devrait être grisé");
-            h.get_by_role_and_label(Role::Button, nom).click();
-            h.run();
-        }
-        assert!(h.state().modale.is_none());
-        assert_eq!(nombre_de_pieces(&h), 1);
-    }
-
-    #[test]
     fn les_reglages_se_changent_et_se_conservent() {
         let chemin = chemin_temp("reglages-ui");
         let etat = Etat::ouvrir(chemin.clone()).unwrap().avec_horloge(|| FIXE);
@@ -1770,7 +1598,7 @@ mod tests {
     }
 
     #[test]
-    fn tous_les_textes_peints_des_ecrans_ventes_et_reglages_atteignent_4_5() {
+    fn tous_les_textes_peints_des_ecrans_reglages_et_stock_atteignent_4_5() {
         // Les contrôles grisés sont dispensés de contraste : on les écarte par leur nom.
         let sauf = |textes: Vec<TextePeint>, grises: &[&str]| -> Vec<TextePeint> {
             textes
@@ -1778,29 +1606,6 @@ mod tests {
                 .filter(|t| !grises.contains(&t.texte.as_str()))
                 .collect()
         };
-
-        let mut app = app_avec_ventes("contraste-ventes");
-        let textes = textes_peints(&mut app, FENETRE, 1.0);
-        assert!(textes.iter().any(|t| t.texte == BOUTON_ANNULER_VENTE));
-        verifier_contrastes(&textes, "ventes");
-        app.annulation_en_attente = Some(1);
-        let textes = textes_peints(&mut app, FENETRE, 1.0);
-        assert!(
-            textes
-                .iter()
-                .any(|t| t.texte == BOUTON_CONFIRMER_ANNULATION)
-        );
-        verifier_contrastes(&textes, "ventes, confirmation");
-
-        let mut app = app_journal_altere("contraste-altere");
-        app.ecran = Ecran::Historique;
-        let textes = textes_peints(&mut app, FENETRE, 1.0);
-        assert!(
-            textes
-                .iter()
-                .any(|t| t.texte.contains("Les ventes et les annulations"))
-        );
-        verifier_contrastes(&sauf(textes, &[BOUTON_ANNULER_VENTE]), "journal altéré");
 
         let mut app = app_vendeuse("contraste-reglages");
         app.ecran = Ecran::Reglages;
