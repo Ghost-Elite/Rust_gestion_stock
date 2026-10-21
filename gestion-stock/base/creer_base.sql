@@ -8,9 +8,13 @@
 
 CREATE DATABASE IF NOT EXISTS kora_marche CHARACTER SET utf8mb4;
 
+-- Le programme se connecte à « 127.0.0.1 » (TCP) : selon la configuration du serveur, il est
+-- reconnu comme « localhost » ou comme « 127.0.0.1 ». On crée donc les deux.
 CREATE USER IF NOT EXISTS 'kora'@'localhost' IDENTIFIED BY 'CHANGEZ-MOI';
+CREATE USER IF NOT EXISTS 'kora'@'127.0.0.1' IDENTIFIED BY 'CHANGEZ-MOI';
 -- Pour un autre poste du réseau, ajoutez une ligne semblable avec son adresse, par exemple :
 -- CREATE USER IF NOT EXISTS 'kora'@'192.168.1.%' IDENTIFIED BY 'CHANGEZ-MOI';
 
 GRANT ALL PRIVILEGES ON kora_marche.* TO 'kora'@'localhost';
+GRANT ALL PRIVILEGES ON kora_marche.* TO 'kora'@'127.0.0.1';
 FLUSH PRIVILEGES;
