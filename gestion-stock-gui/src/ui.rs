@@ -10,8 +10,8 @@
 
 use crate::etat::{Etat, LignePiece, LigneProduit, Reglement, Resume, Retour, chemin_complet};
 use crate::palette::{
-    ACCENT, ACCENT_DOUX, ACCENT_TEXTE, ALERTE_FOND, ALERTE_TEXTE, FILET, FOCUS, FOND, SORTIE_TEXTE,
-    SUCCES_FOND, SUCCES_TEXTE, SURFACE, TEXTE, TEXTE_DISCRET, couleur,
+    ACCENT, ACCENT_DOUX, ACCENT_TEXTE, ALERTE_FOND, ALERTE_TEXTE, AVERTISSEMENT_TEXTE, FILET,
+    FOCUS, FOND, SUCCES_FOND, SUCCES_TEXTE, SURFACE, TEXTE, TEXTE_DISCRET, couleur,
 };
 use crate::police::{Graisse, famille_disponible};
 use crate::textes::*;
@@ -479,7 +479,7 @@ fn historique(ui: &mut Ui, app: &Application) {
         let couleur_mot = if mot == "Entrée" {
             SUCCES_TEXTE
         } else {
-            SORTIE_TEXTE
+            AVERTISSEMENT_TEXTE
         };
         ui.horizontal_wrapped(|ui| {
             ui.label(gras(ui, mot, 15.5).color(couleur(couleur_mot)));
@@ -1676,16 +1676,17 @@ mod tests {
     fn l_alerte_reste_visible_avec_un_texte_agrandi_ou_une_petite_fenetre() {
         let cas = [
             // Assez hautes pour que seul un débordement HORIZONTAL fasse échouer le test : en
-            // hauteur, on peut toujours faire défiler.
+            // hauteur, on peut toujours faire défiler (les cartes plates et les cibles de 48
+            // points de la maquette sont un peu plus hautes que l'ancien style).
             (
                 "texte agrandi à 200 %",
-                Vec2::new(960.0, 1400.0),
+                Vec2::new(960.0, 2400.0),
                 2.0,
                 "Riz 5kg",
             ),
             (
                 "petite fenêtre, nom très long",
-                Vec2::new(640.0, 1000.0),
+                Vec2::new(640.0, 1800.0),
                 1.0,
                 "Huile d'arachide Lesieur bouteille plastique 1 litre (carton de 12)",
             ),

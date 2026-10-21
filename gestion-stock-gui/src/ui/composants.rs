@@ -2,20 +2,20 @@
 //! Les couleurs viennent de `palette`, où leur contraste est vérifié par des tests.
 
 use crate::palette::{
-    ACCENT, ACCENT_TEXTE, ALERTE_FOND, ALERTE_TEXTE, DANGER, FILET, SURFACE, TEXTE_DISCRET,
-    couleur, ombre,
+    ACCENT, ACCENT_TEXTE, ALERTE_FOND, ALERTE_TEXTE, BORDURE_BOUTON, DANGER, FILET, FOCUS, SURFACE,
+    TEXTE_DISCRET, couleur,
 };
 use crate::police::{Graisse, famille_disponible};
 use eframe::egui::{
-    self, Button, CornerRadius, FontId, Frame, Margin, Response, RichText, Stroke, TextEdit, Ui,
-    Vec2, WidgetInfo, WidgetType,
+    self, Button, CornerRadius, FontId, Frame, Margin, Response, RichText, Stroke, StrokeKind,
+    TextEdit, Ui, Vec2, WidgetInfo, WidgetType,
 };
 
 // ---- Petits éléments de style -----------------------------------------------------------------
 
-/// Une carte blanche aux coins arrondis, avec une ombre légère.
+/// Une carte blanche aux coins arrondis, plate : un fin bord, pas d'ombre.
 pub(crate) fn carte<R>(ui: &mut Ui, contenu: impl FnOnce(&mut Ui) -> R) -> R {
-    carte_marge(ui, 18, contenu).inner
+    carte_marge(ui, 16, contenu).inner
 }
 
 /// La même carte avec une marge au choix : le paiement, qui doit tenir à l'écran, en prend moins.
@@ -27,9 +27,8 @@ pub(crate) fn carte_marge<R>(
     Frame::new()
         .fill(couleur(SURFACE))
         .stroke(Stroke::new(1.0, couleur(FILET)))
-        .corner_radius(CornerRadius::same(14))
+        .corner_radius(CornerRadius::same(12))
         .inner_margin(Margin::same(marge))
-        .shadow(ombre())
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             contenu(ui)
@@ -140,7 +139,7 @@ pub(crate) fn bouton(ui: &mut Ui, texte: &str, style: Style, actif: bool) -> Res
         Style::Principal => Button::new(gras(ui, texte, 15.5).color(couleur(ACCENT_TEXTE)))
             .fill(couleur(ACCENT))
             .stroke(Stroke::NONE),
-        Style::Secondaire => Button::new(texte),
+        Style::Secondaire => Button::new(texte).stroke(Stroke::new(1.0, couleur(BORDURE_BOUTON))),
         Style::Danger => Button::new(RichText::new(texte).color(couleur(ALERTE_TEXTE)))
             .fill(couleur(SURFACE))
             .stroke(Stroke::new(1.0, couleur(ALERTE_TEXTE))),
@@ -148,12 +147,27 @@ pub(crate) fn bouton(ui: &mut Ui, texte: &str, style: Style, actif: bool) -> Res
             .fill(couleur(DANGER))
             .stroke(Stroke::NONE),
     };
-    ui.add_enabled(
+    let reponse = ui.add_enabled(
         actif,
         bouton
             .min_size(Vec2::new(0.0, 38.0))
             .corner_radius(CornerRadius::same(10)),
-    )
+    );
+    anneau_de_focus(ui, &reponse, 10);
+    reponse
+}
+
+/// Le contour de focus clavier (2, couleur de focus) : egui le dessine seul tant que le contour
+/// du bouton suit son état ; un bouton au contour fixé (clair, rouge, absent) le perdrait.
+pub(crate) fn anneau_de_focus(ui: &Ui, reponse: &Response, rayon: u8) {
+    if reponse.has_focus() {
+        ui.painter().rect_stroke(
+            reponse.rect,
+            CornerRadius::same(rayon),
+            Stroke::new(2.0, couleur(FOCUS)),
+            StrokeKind::Inside,
+        );
+    }
 }
 
 pub(crate) fn rempli(texte: &str) -> bool {
@@ -202,4 +216,78 @@ pub(crate) fn bouton_symbole(
     );
     reponse.widget_info(|| WidgetInfo::labeled(WidgetType::Button, actif, nom_accessible));
     reponse
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::palette::{self, BORDURE_BOUTON, FOCUS};
+    use eframe::egui::{Color32, Context, Id, Pos2, RawInput, Rect, Shape};
+
+    /// Le premier rectangle de la liste des formes dont le contour a cette couleur et cette
+    /// épaisseur au moins.
+    fn a_un_contour(
+        formes: &[eframe::egui::epaint::ClippedShape],
+        c: Color32,
+        epaisseur: f32,
+    ) -> bool {
+        fn cherche(forme: &Shape, c: Color32, epaisseur: f32) -> bool {
+            match forme {
+                Shape::Vec(v) => v.iter().any(|f| cherche(f, c, epaisseur)),
+                Shape::Rect(r) => r.stroke.color == c && r.stroke.width >= epaisseur,
+                _ => false,
+            }
+        }
+        formes.iter().any(|f| cherche(&f.shape, c, epaisseur))
+    }
+
+    /// Dessine un bouton sur trois images ; si `focus`, le bouton reçoit le focus clavier.
+    fn dessiner_bouton(style: Style, focus: bool) -> Vec<eframe::egui::epaint::ClippedShape> {
+        let ctx = Context::default();
+        palette::appliquer(&ctx);
+        let entree = || RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(400.0, 200.0))),
+            ..Default::default()
+        };
+        let mut id = Id::NULL;
+        let _ = ctx.run_ui(entree(), |ui| {
+            id = bouton(ui, "Test", style, true).id;
+        });
+        if focus {
+            ctx.memory_mut(|m| m.request_focus(id));
+        }
+        let _ = ctx.run_ui(entree(), |ui| {
+            bouton(ui, "Test", style, true);
+        });
+        ctx.run_ui(entree(), |ui| {
+            bouton(ui, "Test", style, true);
+        })
+        .shapes
+    }
+
+    #[test]
+    fn le_focus_clavier_d_un_bouton_se_voit_meme_avec_un_contour_fixe() {
+        let focus = couleur(FOCUS);
+        for style in [
+            Style::Principal,
+            Style::Secondaire,
+            Style::Danger,
+            Style::Confirmation,
+        ] {
+            assert!(
+                a_un_contour(&dessiner_bouton(style, true), focus, 2.0),
+                "pas d'anneau de focus"
+            );
+            assert!(
+                !a_un_contour(&dessiner_bouton(style, false), focus, 2.0),
+                "anneau de focus sans focus"
+            );
+        }
+    }
+
+    #[test]
+    fn un_bouton_secondaire_garde_le_contour_clair_de_la_maquette() {
+        let formes = dessiner_bouton(Style::Secondaire, false);
+        assert!(a_un_contour(&formes, couleur(BORDURE_BOUTON), 1.0));
+    }
 }

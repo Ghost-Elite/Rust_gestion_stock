@@ -1,7 +1,13 @@
 //! Couleurs de l'interface et calcul du contraste (WCAG 2.1).
 //!
-//! Les valeurs sont fixes et vérifiées par les tests en bas de fichier : texte >= 4,5:1
-//! (critère 1.4.3) et contours / focus >= 3:1 (critère 1.4.11).
+//! Les valeurs viennent de la maquette « POS Kora Marché » et sont fixes ; les tests en bas de
+//! fichier vérifient : texte >= 4,5:1 (critère 1.4.3) et contours de champs / focus >= 3:1
+//! (critère 1.4.11).
+//!
+//! Écarts avec la maquette, voulus : le contour des champs de saisie passe de `#AEB5BF`
+//! (2,07:1 sur blanc) à `#848B96` (3,07:1 au moins, sur le fond de page comme sur les cartes) ;
+//! les contours des boutons secondaires gardent le `#D5DAE0` clair de la maquette, ces boutons
+//! étant identifiés par leur texte et non par leur bord.
 
 use eframe::egui::{
     Color32, Context, CornerRadius, FontFamily, FontId, Stroke, TextStyle, Theme, ThemePreference,
@@ -12,23 +18,36 @@ pub type Rgb = [u8; 3];
 
 // ---- Fonds et textes ------------------------------------------------------------------------
 /// Le fond de la fenêtre : un gris très clair, sur lequel les cartes blanches se détachent.
-pub const FOND: Rgb = [246, 247, 251];
-/// Le fond des cartes, des champs de saisie et de l'en-tête.
+pub const FOND: Rgb = [242, 243, 245];
+/// Le fond des cartes, des fenêtres modales et des champs de saisie.
 pub const SURFACE: Rgb = [255, 255, 255];
-pub const FOND_DOUX: Rgb = [243, 244, 246];
-pub const TEXTE: Rgb = [17, 24, 39];
-/// Pour les libellés secondaires : reste lisible (>= 4,5:1) sur le fond comme sur les cartes.
-pub const TEXTE_DISCRET: Rgb = [75, 85, 99];
-/// Les contours des composants (champs, boutons) : au moins 3:1, critère WCAG 1.4.11.
-pub const BORDURE: Rgb = [120, 130, 145];
-/// Les filets décoratifs (bords de cartes, séparateurs) : volontairement discrets.
-pub const FILET: Rgb = [226, 230, 236];
+/// Les petits fonds de remplacement (repère de produit, montants rapides).
+pub const FOND_DOUX: Rgb = [245, 246, 248];
+pub const TEXTE: Rgb = [22, 25, 29];
+/// Les libellés de second rang : pour les montants et les détails.
+pub const TEXTE_SECONDAIRE: Rgb = [74, 81, 91];
+/// Pour les libellés discrets : reste lisible (>= 4,5:1) sur le fond comme sur les cartes.
+pub const TEXTE_DISCRET: Rgb = [91, 99, 110];
+/// Le contour des CHAMPS de saisie : au moins 3:1, critère WCAG 1.4.11.
+pub const BORDURE: Rgb = [132, 139, 150];
+/// Le contour (décoratif) des boutons secondaires : clair, comme dans la maquette.
+pub const BORDURE_BOUTON: Rgb = [213, 218, 224];
+/// Les bords de cartes et les séparateurs : volontairement discrets.
+pub const FILET: Rgb = [225, 228, 232];
+/// Le filet entre deux lignes d'une liste.
+pub const FILET_LIGNE: Rgb = [238, 240, 243];
+
+// ---- L'en-tête sombre -----------------------------------------------------------------------
+pub const ENTETE_FOND: Rgb = [22, 25, 29];
+pub const ENTETE_TEXTE: Rgb = [255, 255, 255];
+pub const ENTETE_DISCRET: Rgb = [196, 202, 211];
 
 // ---- Couleur d'accent -----------------------------------------------------------------------
-pub const ACCENT: Rgb = [67, 56, 202];
-pub const ACCENT_SURVOL: Rgb = [55, 48, 163];
+pub const ACCENT: Rgb = [30, 86, 200];
+pub const ACCENT_SURVOL: Rgb = [22, 63, 148];
 pub const ACCENT_TEXTE: Rgb = [255, 255, 255];
-pub const ACCENT_DOUX: Rgb = [238, 242, 255];
+/// La ligne choisie, le survol d'un bouton clair.
+pub const ACCENT_DOUX: Rgb = [234, 240, 252];
 pub const FOCUS: Rgb = ACCENT;
 
 // Les boutons ordinaires sont CLAIRS avec un texte sombre : dans egui, la couleur de texte d'un
@@ -37,21 +56,31 @@ pub const FOCUS: Rgb = ACCENT;
 // Les boutons principaux (fond d'accent, texte blanc) fixent leurs couleurs un par un.
 pub const BOUTON_FOND: Rgb = SURFACE;
 pub const BOUTON_SURVOL_FOND: Rgb = ACCENT_DOUX;
-pub const BOUTON_ACTIF_FOND: Rgb = [199, 210, 254];
+pub const BOUTON_ACTIF_FOND: Rgb = [214, 226, 248];
 pub const BOUTON_TEXTE: Rgb = TEXTE;
 
 pub const SELECTION_FOND: Rgb = ACCENT_DOUX;
 pub const SELECTION_TEXTE: Rgb = TEXTE;
 
 // ---- États ----------------------------------------------------------------------------------
-pub const ALERTE_FOND: Rgb = [254, 226, 226];
-pub const ALERTE_TEXTE: Rgb = [153, 27, 27];
-pub const SUCCES_FOND: Rgb = [220, 252, 231];
-pub const SUCCES_TEXTE: Rgb = [22, 101, 52];
-/// Le mot « Sortie » dans l'historique (le mot « Entrée » prend la couleur du succès).
-pub const SORTIE_TEXTE: Rgb = [146, 64, 14];
-/// Le fond du bouton « Confirmer la suppression » (texte blanc dessus).
-pub const DANGER: Rgb = [185, 28, 28];
+pub const ALERTE_FOND: Rgb = [253, 236, 234];
+pub const ALERTE_TEXTE: Rgb = [166, 27, 18];
+pub const ALERTE_BORD: Rgb = [232, 180, 174];
+pub const SUCCES_FOND: Rgb = [232, 245, 238];
+pub const SUCCES_TEXTE: Rgb = [18, 101, 63];
+/// Le fond d'un bouton « validé » (texte blanc dessus).
+pub const SUCCES_BOUTON: Rgb = [18, 120, 74];
+/// Un état à surveiller : stock bas, ticket remboursé, mot « Sortie » dans l'historique.
+pub const AVERTISSEMENT_TEXTE: Rgb = [138, 65, 6];
+/// Le fond du bouton de suppression ou de remboursement (texte blanc dessus).
+pub const DANGER: Rgb = [180, 35, 24];
+/// Un contrôle grisé : son texte est dispensé de contraste (WCAG 1.4.3), la raison s'écrit à côté.
+pub const GRISE_FOND: Rgb = [227, 230, 234];
+pub const GRISE_TEXTE: Rgb = [107, 114, 128];
+
+/// Le voile derrière une fenêtre modale : noir-bleu à moitié transparent.
+/// (Valeurs prémultipliées : 22, 25, 29 à 128/255, car `from_rgba_unmultiplied` n'est pas `const`.)
+pub const VOILE: Color32 = Color32::from_rgba_premultiplied(11, 13, 15, 128);
 
 pub fn couleur(c: Rgb) -> Color32 {
     Color32::from_rgb(c[0], c[1], c[2])
@@ -77,16 +106,6 @@ pub fn rapport_contraste(a: Rgb, b: Rgb) -> f64 {
     (clair + 0.05) / (sombre + 0.05)
 }
 
-/// Une ombre légère, pour que les cartes se détachent du fond.
-pub fn ombre() -> Shadow {
-    Shadow {
-        offset: [0, 2],
-        blur: 12,
-        spread: 0,
-        color: Color32::from_black_alpha(20),
-    }
-}
-
 /// Le style egui complet, construit à partir des constantes ci-dessus.
 /// On n'utilise pas `override_text_color` : il écraserait le texte blanc des boutons principaux.
 pub fn visuals() -> Visuals {
@@ -96,13 +115,13 @@ pub fn visuals() -> Visuals {
     v.extreme_bg_color = couleur(SURFACE); // fond des champs de saisie
     v.faint_bg_color = couleur(FOND_DOUX);
     v.hyperlink_color = couleur(FOCUS);
-    v.window_corner_radius = CornerRadius::same(14);
+    v.window_corner_radius = CornerRadius::same(16);
     v.menu_corner_radius = CornerRadius::same(10);
     v.window_stroke = Stroke::new(1.0, couleur(FILET));
-    v.window_shadow = ombre();
-    v.popup_shadow = ombre();
+    v.window_shadow = Shadow::NONE;
+    v.popup_shadow = Shadow::NONE;
 
-    let arrondi = CornerRadius::same(8);
+    let arrondi = CornerRadius::same(10);
     let contour = Stroke::new(1.0, couleur(BORDURE));
     let contour_focus = Stroke::new(2.0, couleur(FOCUS));
 
@@ -115,7 +134,8 @@ pub fn visuals() -> Visuals {
     w.corner_radius = arrondi;
 
     // Boutons et autres widgets interactifs : texte sombre sur fond clair, et une bordure
-    // qui les distingue du fond ; egui peint les boutons avec `weak_bg_fill`.
+    // qui les distingue du fond ; egui peint les boutons avec `weak_bg_fill`. Cette bordure est
+    // celle des CHAMPS ; les boutons secondaires fixent la leur (`BORDURE_BOUTON`).
     for (w, fond, trait_) in [
         (&mut v.widgets.inactive, BOUTON_FOND, contour),
         (&mut v.widgets.hovered, BOUTON_SURVOL_FOND, contour_focus),
@@ -148,21 +168,21 @@ pub fn appliquer(ctx: &Context) {
     ctx.style_mut_of(Theme::Light, |style| {
         style.visuals = visuals();
         style.spacing.item_spacing = Vec2::new(10.0, 10.0);
-        style.spacing.button_padding = Vec2::new(16.0, 9.0);
-        style.spacing.interact_size.y = 36.0;
+        style.spacing.button_padding = Vec2::new(16.0, 10.0);
+        style.spacing.interact_size.y = 48.0;
         style.text_styles = [
             (
                 TextStyle::Heading,
                 crate::police::police(crate::police::Graisse::SemiGrasse, 22.0),
             ),
-            (TextStyle::Body, FontId::new(15.5, FontFamily::Proportional)),
+            (TextStyle::Body, FontId::new(16.0, FontFamily::Proportional)),
             (
                 TextStyle::Button,
-                FontId::new(15.5, FontFamily::Proportional),
+                FontId::new(16.0, FontFamily::Proportional),
             ),
             (
                 TextStyle::Small,
-                FontId::new(13.5, FontFamily::Proportional),
+                FontId::new(14.0, FontFamily::Proportional),
             ),
             (
                 TextStyle::Monospace,
@@ -204,19 +224,27 @@ mod tests {
             ("texte/fond", TEXTE, FOND),
             ("texte/carte", TEXTE, SURFACE),
             ("texte/fond doux", TEXTE, FOND_DOUX),
+            ("secondaire/carte", TEXTE_SECONDAIRE, SURFACE),
+            ("secondaire/fond", TEXTE_SECONDAIRE, FOND),
             ("discret/fond", TEXTE_DISCRET, FOND),
             ("discret/carte", TEXTE_DISCRET, SURFACE),
+            ("discret/sélection", TEXTE_DISCRET, ACCENT_DOUX),
+            ("en-tête", ENTETE_TEXTE, ENTETE_FOND),
+            ("en-tête discret", ENTETE_DISCRET, ENTETE_FOND),
             ("bouton", BOUTON_TEXTE, BOUTON_FOND),
             ("bouton survolé", BOUTON_TEXTE, BOUTON_SURVOL_FOND),
             ("bouton pressé", BOUTON_TEXTE, BOUTON_ACTIF_FOND),
+            ("accent/carte", ACCENT, SURFACE),
+            ("accent/sélection", ACCENT, ACCENT_DOUX),
             ("bouton principal", ACCENT_TEXTE, ACCENT),
             ("bouton principal survolé", ACCENT_TEXTE, ACCENT_SURVOL),
             ("bouton de suppression", ACCENT_TEXTE, DANGER),
+            ("bouton validé", ACCENT_TEXTE, SUCCES_BOUTON),
             ("alerte", ALERTE_TEXTE, ALERTE_FOND),
             ("alerte sur carte", ALERTE_TEXTE, SURFACE),
             ("correct", SUCCES_TEXTE, SUCCES_FOND),
-            ("entrée dans l'historique", SUCCES_TEXTE, SURFACE),
-            ("sortie dans l'historique", SORTIE_TEXTE, SURFACE),
+            ("succès sur carte", SUCCES_TEXTE, SURFACE),
+            ("avertissement", AVERTISSEMENT_TEXTE, SURFACE),
             ("sélection", SELECTION_TEXTE, SELECTION_FOND),
         ];
         for (nom, texte, fond) in paires {
@@ -226,6 +254,18 @@ mod tests {
                 rapport_contraste(texte, fond)
             );
         }
+    }
+
+    #[test]
+    fn les_valeurs_de_la_maquette_sont_reprises() {
+        assert_eq!(FOND, [242, 243, 245]);
+        assert_eq!(SURFACE, [255, 255, 255]);
+        assert_eq!(ACCENT, [30, 86, 200]);
+        assert_eq!(ENTETE_FOND, [22, 25, 29]);
+        assert_eq!(SUCCES_BOUTON, [18, 120, 74]);
+        assert_eq!(ALERTE_BORD, [232, 180, 174]);
+        assert_eq!(GRISE_FOND, [227, 230, 234]);
+        assert_eq!(VOILE.a(), 128);
     }
 
     #[test]
