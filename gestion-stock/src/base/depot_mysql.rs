@@ -759,7 +759,7 @@ impl Depot for DepotMysql {
     fn ajouter_produit(&mut self, nom: &str, seuil: u32) -> Result<(), ErreurStock> {
         let cle_du_nom = cle(nom);
         self.transaction(|tx, _| {
-            let reglages = lire_reglages(tx, true)?;
+            let reglages = lire_reglages(tx, false)?;
             let produits = charger_produits(tx, std::slice::from_ref(&cle_du_nom))?;
             let mut stock = Stock::partiel(produits, reglages, Vec::new());
             stock.ajouter_produit(nom, seuil)?;
@@ -799,7 +799,7 @@ impl Depot for DepotMysql {
     ) -> Result<(), ErreurStock> {
         let cle_du_nom = cle(nom);
         self.transaction(|tx, _| {
-            let reglages = lire_reglages(tx, true)?;
+            let reglages = lire_reglages(tx, false)?;
             let produits = charger_produits(tx, std::slice::from_ref(&cle_du_nom))?;
             let mut stock = Stock::partiel(produits, reglages, Vec::new());
             stock.definir_prix(nom, prix, taux_bp)?;
@@ -814,6 +814,8 @@ impl Depot for DepotMysql {
 
     fn definir_reglages(&mut self, reglages: Reglages) -> Result<(), ErreurStock> {
         self.transaction(|tx, _| {
+            // Seule cette opération verrouille les réglages : les autres ne les lisent que pour
+            // écrire un message, et ne doivent pas faire attendre les postes les uns les autres.
             let actuels = lire_reglages(tx, true)?;
             // Une pièce quelconque suffit : le cœur verrouille la devise et le profil dès qu'il
             // y en a une.

@@ -1,6 +1,8 @@
 # Base de données MySQL pour la caisse Kora Marché — conception
 
 > Statut : **approuvé** (choix (a) du § 9 : la caisse refuse de vendre quand le serveur est injoignable). Plan 1 : `docs/superpowers/plans/2026-10-21-base-mysql-couche-stockage.md`.
+>
+> **Avancement.** Plan 1 (la couche de stockage) : **fait** — schéma et migrations, `DepotMysql` (même scénario de règles que le fichier), transactions et ordre fixe des verrous (un interblocage a été trouvé et corrigé par les tests de concurrence), reprise après coupure, import du `stock.txt` (60 000 pièces testées), commandes `stock migrer / importer / verifier`. Reste à faire **avec l'accord de la personne** : créer la vraie base `kora_marche` et son compte `kora` sur le MariaDB de XAMPP, écrire `base.conf` et importer le vrai `stock.txt`. Plan 2 (l'interface graphique et les commandes du fichier sur la base, « En ligne / Hors ligne ») : **à écrire**.
 > Cette conception prolonge `2026-10-21-kora-marche-pos-design.md` (étapes B, C et D de la caisse) : elle doit être faite **avant l'étape B**, parce que B change le format des données.
 
 ## 1. Intention
