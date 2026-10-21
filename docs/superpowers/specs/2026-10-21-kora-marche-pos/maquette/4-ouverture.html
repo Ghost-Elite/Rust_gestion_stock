@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="fr"><head>
+<meta charset="utf-8">
+<title>Caisse — Ouverture de caisse</title>
+<script src="ASSET:2847a57d:text/javascript"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&amp;display=swap">
+<style>
+body{margin:0}
+*{box-sizing:border-box}
+button,input,a{font-family:inherit}
+button{cursor:pointer}
+button:focus-visible,a:focus-visible,input:focus-visible{outline:2px solid #1E56C8;outline-offset:2px}
+a{color:#1E56C8}a:hover{color:#163F94}
+</style>
+</helmet>
+<div style="width: 1366px; height: 768px; position: relative; overflow: hidden; display: flex; flex-direction: column; background: #F2F3F5; color: #16191D; font-family: 'IBM Plex Sans', system-ui, sans-serif; font-variant-numeric: tabular-nums">
+<header style="height: 56px; flex: none; display: flex; align-items: center; gap: 20px; padding: 0 20px; background: #16191D; color: #FFFFFF">
+<span style="font-size: 18px; font-weight: 700">Kora Marché</span>
+<span style="font-size: 14px; color: #C4CAD3">Caisse 04 · Awa Ndiaye</span>
+<div style="flex: 1"></div>
+<span style="display: flex; align-items: center; gap: 8px; font-size: 14px; color: #C4CAD3"><span style="width: 8px; height: 8px; border-radius: 50%; background: #8B929C"></span>Caisse fermée</span>
+<span style="font-size: 18px; font-weight: 600">07:56</span>
+</header>
+
+<main style="flex: 1; display: flex; align-items: center; justify-content: center; padding: 20px">
+<div style="width: 760px; background: #FFFFFF; border: 1px solid #E1E4E8; border-radius: 16px; padding: 28px 32px; display: flex; flex-direction: column; gap: 20px">
+<div style="display: flex; flex-direction: column; gap: 4px"><h1 style="margin: 0; font-size: 26px; font-weight: 600">Ouverture de caisse</h1><span style="font-size: 16px; color: #5B636E">Comptez l'argent du tiroir avant la première vente.</span></div>
+
+<div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px 16px">
+<sc-for list="{{rows}}" as="r" hint-placeholder-count="6">
+<label style="display: flex; align-items: center; gap: 10px; font-size: 16px; color: #4A515B"><span style="width: 92px; font-weight: 600; color: #16191D">{{r.label}}</span>×
+<input value="{{r.qty}}" sc-camel-on-change="{{r.set}}" aria-label="Nombre de {{r.label}}" style="width: 80px; height: 48px; padding: 0 10px; border: 1px solid #AEB5BF; border-radius: 8px; text-align: center; font-size: 18px; font-weight: 600; color: #16191D; outline: none">
+</label>
+</sc-for>
+</div>
+
+<div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; padding-top: 4px; border-top: 1px solid #E1E4E8">
+<div style="padding-top: 14px"><div style="font-size: 14px; color: #5B636E">Compté</div><div style="font-size: 30px; font-weight: 700">{{counted}}</div></div>
+<div style="padding-top: 14px"><div style="font-size: 14px; color: #5B636E">Attendu</div><div style="font-size: 30px; font-weight: 700">50 000</div></div>
+<div style="padding-top: 14px"><div style="font-size: 14px; color: #5B636E">Écart</div><div style="font-size: 30px; font-weight: 700; color: {{gapColor}}">{{gap}}</div></div>
+</div>
+<span style="font-size: 15px; color: {{gapColor}}">{{gapNote}}</span>
+
+<a href="Main.dc.html" style="height: 64px; display: flex; align-items: center; justify-content: center; border-radius: 12px; background: #1E56C8; color: #FFFFFF; font-size: 20px; font-weight: 700; text-decoration: none">{{btnLabel}}</a>
+</div>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script="" data-props="{&quot;$preview&quot;:{&quot;width&quot;:1366,&quot;height&quot;:768}}">
+var ROWS = [['b10000', '10 000', 10000, 2], ['b5000', '5 000', 5000, 3], ['b2000', '2 000', 2000, 4], ['b1000', '1 000', 1000, 3], ['b500', '500', 500, 4], ['pieces', 'Pièces', 1, 2000]];
+function sp(n) { return (n < 0 ? '−' : '') + String(Math.abs(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ' '); }
+class Component extends DCLogic {
+  constructor(props) { super(props); var q = {}; ROWS.forEach(function (r) { q[r[0]] = r[3]; }); this.state = { q: q }; }
+  renderVals() {
+    var self = this, s = this.state;
+    var total = ROWS.reduce(function (a, r) { return a + (s.q[r[0]] || 0) * r[2]; }, 0);
+    var gap = total - 50000;
+    return {
+      rows: ROWS.map(function (r) {
+        return { label: r[1], qty: String(s.q[r[0]] || 0), set: function (e) { var q = Object.assign({}, s.q); q[r[0]] = parseInt(String(e.target.value).replace(/\D/g, ''), 10) || 0; self.setState({ q: q }); } };
+      }),
+      counted: sp(total), gap: (gap > 0 ? '+' : '') + sp(gap),
+      gapColor: gap === 0 ? '#12653F' : '#A61B12',
+      gapNote: gap === 0 ? 'Le compte est bon. Pièces : indiquez le montant total en FCFA.' : 'Écart détecté : recomptez ou prévenez votre responsable avant d\'ouvrir.',
+      btnLabel: gap === 0 ? 'Ouvrir la caisse' : 'Ouvrir quand même (écart signalé)'
+    };
+  }
+}
+</script>
+
+
+</body></html>

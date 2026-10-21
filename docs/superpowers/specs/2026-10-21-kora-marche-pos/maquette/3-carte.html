@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="fr"><head>
+<meta charset="utf-8">
+<title>Caisse — Paiement par carte</title>
+<script src="ASSET:c465b30e:text/javascript"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&amp;display=swap">
+<style>
+body{margin:0}
+*{box-sizing:border-box}
+button,a{font-family:inherit}
+button{cursor:pointer}
+button:focus-visible,a:focus-visible{outline:2px solid #1E56C8;outline-offset:2px}
+a{color:#1E56C8}a:hover{color:#163F94}
+</style>
+</helmet>
+<div style="width: 1366px; height: 768px; position: relative; overflow: hidden; display: flex; flex-direction: column; background: #F2F3F5; color: #16191D; font-family: 'IBM Plex Sans', system-ui, sans-serif; font-variant-numeric: tabular-nums">
+<header style="height: 56px; flex: none; display: flex; align-items: center; gap: 20px; padding: 0 20px; background: #16191D; color: #FFFFFF">
+<span style="font-size: 18px; font-weight: 700">Kora Marché</span>
+<span style="font-size: 14px; color: #C4CAD3">Caisse 04 · Awa Ndiaye</span>
+<div style="flex: 1"></div>
+<span style="font-size: 18px; font-weight: 600">14:32</span>
+</header>
+<div style="flex: 1; display: flex; gap: 16px; padding: 16px">
+<div style="flex: 1; border-radius: 12px; background: #FFFFFF; border: 1px solid #E1E4E8"></div>
+<div style="width: 420px; border-radius: 12px; background: #FFFFFF; border: 1px solid #E1E4E8"></div>
+</div>
+
+<div style="position: absolute; inset: 0; background: rgba(22, 25, 29, 0.5); display: flex; align-items: center; justify-content: center">
+<div role="dialog" aria-modal="true" aria-label="Paiement par carte" style="width: 480px; background: #FFFFFF; border-radius: 16px; padding: 32px 28px 28px; display: flex; flex-direction: column; align-items: center; gap: 16px; text-align: center">
+<span style="font-size: 22px; font-weight: 600">Paiement par carte</span>
+<strong style="font-size: 44px">17 025 FCFA</strong>
+<div role="status" style="width: 100%; padding: 16px; border-radius: 10px; font-size: 17px; font-weight: 600; background: {{msgBg}}; color: {{msgFg}}">{{msg}}</div>
+<span style="font-size: 15px; color: #4A515B">{{help}}</span>
+<sc-if value="{{isWait}}" hint-placeholder-val="{{true}}">
+<div style="width: 100%; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px">
+<button type="button" sc-camel-on-click="{{simOk}}" style="height: 48px; border-radius: 10px; border: 1px dashed #AEB5BF; background: #FFFFFF; color: #3F4650; font-size: 14px; font-weight: 600">Simuler : acceptée</button>
+<button type="button" sc-camel-on-click="{{simKo}}" style="height: 48px; border-radius: 10px; border: 1px dashed #AEB5BF; background: #FFFFFF; color: #3F4650; font-size: 14px; font-weight: 600">Simuler : refusée</button>
+</div>
+<a href="Main.dc.html" style="width: 100%; height: 56px; display: flex; align-items: center; justify-content: center; border-radius: 10px; border: 1px solid #D5DAE0; background: #FFFFFF; color: #16191d; font-size: 17px; font-weight: 600; text-decoration: none">Annuler</a>
+</sc-if>
+<sc-if value="{{isKo}}" hint-placeholder-val="{{false}}">
+<div style="width: 100%; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px">
+<button type="button" sc-camel-on-click="{{retry}}" style="height: 56px; border-radius: 10px; border: 1px solid #D5DAE0; background: #FFFFFF; color: #16191D; font-size: 17px; font-weight: 600">Réessayer</button>
+<a href="Especes.dc.html" style="height: 56px; display: flex; align-items: center; justify-content: center; border-radius: 10px; background: #1E56C8; color: #FFFFFF; font-size: 17px; font-weight: 600; text-decoration: none">Payer en espèces</a>
+</div>
+</sc-if>
+<sc-if value="{{isOk}}" hint-placeholder-val="{{false}}">
+<a href="Main.dc.html" style="width: 100%; height: 60px; display: flex; align-items: center; justify-content: center; border-radius: 10px; background: #1E56C8; color: #FFFFFF; font-size: 18px; font-weight: 700; text-decoration: none">Nouvelle vente</a>
+</sc-if>
+</div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script="" data-props="{&quot;etat&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;En attente&quot;,&quot;Acceptée&quot;,&quot;Refusée&quot;],&quot;default&quot;:&quot;En attente&quot;},&quot;$preview&quot;:{&quot;width&quot;:1366,&quot;height&quot;:768}}">
+var MAP = { 'En attente': 'wait', 'Acceptée': 'ok', 'Refusée': 'ko' };
+class Component extends DCLogic {
+  constructor(props) { super(props); this.state = { st: MAP[props && props.etat] || 'wait' }; }
+  componentDidUpdate(prev) { if (prev.etat !== this.props.etat) this.setState({ st: MAP[this.props.etat] || 'wait' }); }
+  renderVals() {
+    var self = this, st = this.state.st;
+    return {
+      isWait: st === 'wait', isOk: st === 'ok', isKo: st === 'ko',
+      msg: st === 'wait' ? 'Présentez la carte sur le terminal' : st === 'ok' ? 'Paiement accepté' : 'Carte refusée',
+      msgBg: st === 'wait' ? '#EAF0FC' : st === 'ok' ? '#E8F5EE' : '#FDECEA',
+      msgFg: st === 'wait' ? '#163F94' : st === 'ok' ? '#12653F' : '#A61B12',
+      help: st === 'wait' ? 'Sans contact, puce ou piste. Le montant est déjà envoyé au terminal.' : st === 'ok' ? 'Le ticket est imprimé.' : 'Aucun montant n\'a été débité. Proposez un autre moyen de paiement.',
+      simOk: function () { self.setState({ st: 'ok' }); },
+      simKo: function () { self.setState({ st: 'ko' }); },
+      retry: function () { self.setState({ st: 'wait' }); }
+    };
+  }
+}
+</script>
+
+
+</body></html>

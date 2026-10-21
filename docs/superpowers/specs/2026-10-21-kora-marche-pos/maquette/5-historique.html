@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="fr"><head>
+<meta charset="utf-8">
+<title>Caisse — Historique des ventes</title>
+<script src="ASSET:31d9d00a:text/javascript"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&amp;display=swap">
+<style>
+body{margin:0}
+*{box-sizing:border-box}
+button,input,a{font-family:inherit}
+button{cursor:pointer}
+button:disabled{cursor:not-allowed}
+button:focus-visible,a:focus-visible,input:focus-visible{outline:2px solid #1E56C8;outline-offset:2px}
+a{color:#1E56C8}a:hover{color:#163F94}
+</style>
+</helmet>
+<div style="width: 1366px; height: 768px; position: relative; overflow: hidden; display: flex; flex-direction: column; background: #F2F3F5; color: #16191D; font-family: 'IBM Plex Sans', system-ui, sans-serif; font-variant-numeric: tabular-nums">
+<header style="height: 56px; flex: none; display: flex; align-items: center; gap: 20px; padding: 0 12px 0 20px; background: #16191D; color: #FFFFFF">
+<span style="font-size: 18px; font-weight: 700">Kora Marché</span>
+<span style="font-size: 14px; color: #C4CAD3">Caisse 04 · Awa Ndiaye</span>
+<div style="flex: 1"></div>
+<a href="Rapport.dc.html" style="height: 40px; display: flex; align-items: center; padding: 0 16px; border-radius: 8px; border: 1px solid #4A515B; color: #FFFFFF; font-size: 15px; font-weight: 600; text-decoration: none">Rapport de caisse</a>
+<a href="Main.dc.html" style="height: 40px; display: flex; align-items: center; padding: 0 16px; border-radius: 8px; background: #FFFFFF; color: #16191D; font-size: 15px; font-weight: 600; text-decoration: none">Retour à la vente</a>
+</header>
+
+<div style="flex: 1; min-height: 0; display: flex; gap: 16px; padding: 16px">
+<section aria-label="Ventes du jour" style="flex: 1; min-width: 0; display: flex; flex-direction: column; background: #FFFFFF; border: 1px solid #E1E4E8; border-radius: 12px; overflow: hidden">
+<div style="display: flex; align-items: center; gap: 16px; padding: 16px 20px; border-bottom: 1px solid #E1E4E8">
+<h1 style="margin: 0; font-size: 22px; font-weight: 600; flex: 1">Ventes du jour</h1>
+<input value="{{q}}" sc-camel-on-change="{{onQ}}" aria-label="Rechercher un ticket" placeholder="N° de ticket" style="width: 240px; height: 48px; padding: 0 14px; border: 1px solid #AEB5BF; border-radius: 10px; font-size: 16px; color: #16191D; outline: none">
+</div>
+<div style="flex: 1; min-height: 0; overflow-y: auto">
+<sc-for list="{{rows}}" as="r" hint-placeholder-count="8">
+<button type="button" sc-camel-on-click="{{r.pick}}" aria-pressed="{{r.on}}" style="width: 100%; display: grid; grid-template-columns: 120px 80px minmax(0, 1fr) 140px 150px; align-items: center; gap: 12px; height: 56px; padding: 0 20px; border: 0; border-bottom: 1px solid #EEF0F3; text-align: left; font-size: 16px; color: #16191D; background: {{r.bg}}">
+<span style="font-weight: 600">{{r.id}}</span>
+<span style="color: #5B636E">{{r.time}}</span>
+<span style="color: #5B636E">{{r.mode}}</span>
+<span style="text-align: right; font-weight: 600; text-decoration: {{r.deco}}">{{r.total}}</span>
+<span style="text-align: right; font-size: 14px; font-weight: 600; color: {{r.stColor}}">{{r.status}}</span>
+</button>
+</sc-for>
+</div>
+</section>
+
+<aside aria-label="Ticket" style="width: 420px; flex: none; display: flex; flex-direction: column; background: #FFFFFF; border: 1px solid #E1E4E8; border-radius: 12px; overflow: hidden">
+<div style="padding: 18px 20px; border-bottom: 1px solid #E1E4E8"><div style="font-size: 20px; font-weight: 600">Ticket {{d.id}}</div><div style="font-size: 15px; color: #5B636E">{{d.meta}}</div></div>
+<div style="flex: 1; min-height: 0; overflow-y: auto; padding: 8px 20px">
+<sc-for list="{{d.lines}}" as="l" hint-placeholder-count="5">
+<div style="display: flex; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px dashed #E1E4E8; font-size: 16px"><img src="{{l.img}}" alt="" style="width: 40px; height: 40px; flex: none; border-radius: 6px; background: #F5F6F8; object-fit: contain; padding: 3px"><span style="flex: 1">{{l.qty}} × {{l.name}}</span><span style="font-weight: 600; white-space: nowrap">{{l.total}}</span></div>
+</sc-for>
+</div>
+<div style="padding: 16px 20px; border-top: 1px solid #E1E4E8; display: flex; justify-content: space-between; align-items: baseline"><span style="font-size: 17px; font-weight: 600">Total</span><strong style="font-size: 28px">{{d.total}}</strong></div>
+<div style="padding: 0 20px 20px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px">
+<button type="button" sc-camel-on-click="{{reprint}}" style="height: 56px; border-radius: 10px; border: 1px solid #D5DAE0; background: #FFFFFF; color: #16191D; font-size: 16px; font-weight: 600">{{reprintLabel}}</button>
+<button type="button" sc-camel-on-click="{{askRefund}}" disabled="{{cantRefund}}" style="height: 56px; border-radius: 10px; font-size: 16px; font-weight: 600; {{refundStyle}}">Rembourser</button>
+</div>
+</aside>
+</div>
+
+<sc-if value="{{modal}}" hint-placeholder-val="{{false}}">
+<div style="position: absolute; inset: 0; background: rgba(22, 25, 29, 0.5); display: flex; align-items: center; justify-content: center">
+<div role="dialog" aria-modal="true" aria-label="Rembourser le ticket" style="width: 460px; background: #FFFFFF; border-radius: 16px; padding: 28px; display: flex; flex-direction: column; gap: 16px">
+<span style="font-size: 22px; font-weight: 600">Rembourser le ticket {{d.id}} ?</span>
+<span style="font-size: 16px; color: #4A515B">Montant remboursé : <strong style="color: #16191D">{{d.total}}</strong>, par le même moyen de paiement.</span>
+<label style="display: flex; flex-direction: column; gap: 6px; font-size: 15px; color: #4A515B">Code superviseur
+<input type="password" value="{{sup}}" sc-camel-on-change="{{onSup}}" placeholder="••••" style="height: 52px; padding: 0 14px; border: 1px solid #AEB5BF; border-radius: 10px; font-size: 20px; letter-spacing: 0.2em; outline: none">
+</label>
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px">
+<button type="button" sc-camel-on-click="{{closeModal}}" style="height: 56px; border-radius: 10px; border: 1px solid #D5DAE0; background: #FFFFFF; color: #16191D; font-size: 17px; font-weight: 600">Annuler</button>
+<button type="button" sc-camel-on-click="{{confirm}}" disabled="{{supLocked}}" style="height: 56px; border: 0; border-radius: 10px; font-size: 17px; font-weight: 600; {{confirmStyle}}">Rembourser</button>
+</div>
+</div>
+</div>
+</sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script="" data-props="{&quot;$preview&quot;:{&quot;width&quot;:1366,&quot;height&quot;:768}}">
+var P = { riz: ['Riz parfumé 5 kg', 4750], huile: ['Huile d\'arachide 1 L', 1600], lait: ['Lait en poudre 400 g', 2350], sucre: ['Sucre 1 kg', 800],
+  eau: ['Eau minérale 1,5 L', 400], bag: ['Baguette', 175], spa: ['Spaghetti 500 g', 650], tom: ['Concentré de tomate', 700], yao: ['Yaourt × 4', 1500],
+  bis: ['Jus de bissap 1 L', 1000], the: ['Thé vert 200 g', 1250], les: ['Lessive 1 kg', 1150], pou: ['Poulet entier', 3400], oig: ['Oignons 1 kg', 650], caf: ['Café moulu 250 g', 1900] };
+var IMG = { riz: '6bc663a33d5ed3802099cd456d94d5aa', huile: '18a7b09926f3d174c085940254c41891', lait: '8a13aa0a150494b5dffb327f2df6d028', sucre: 'b8690131518e7844fcb8974744768cc1',
+  eau: 'ab91540a9ebc04b701c8736bb9e2c2ee', bag: '88de880307584d18f4a5da36cd015e79', spa: 'b7dd1d33d2c54abaed5df2742c7ab063', tom: '229b85a4422ff10626537151ce98be92', yao: 'a26dcc7eeb0d26787112b01ca21a145c',
+  bis: 'b6185d3b2e74c443566af67a606cd4e0', the: 'e11d3b05fe52f41ef99ec2afe7e55515', les: '694dc608bbd478f35ae2957cb8e8f3b1', pou: '3133aacfbfa0c4de01e7b23e96a534ad', oig: 'cc87706aa5f7421486a6dbd1fa1d4039', caf: 'ced9eb6d0ba34786f853f1e96d651520' };
+var TX = [
+  ['04-0186', '14:28', 'card', 'paid', [['lait', 1], ['sucre', 2], ['bag', 2], ['caf', 1], ['yao', 1], ['pou', 1], ['eau', 1]]],
+  ['04-0185', '14:21', 'cash', 'paid', [['bag', 1], ['bis', 2]]],
+  ['04-0184', '14:15', 'cash', 'paid', [['riz', 2], ['huile', 3], ['eau', 12], ['tom', 3], ['oig', 2]]],
+  ['04-0183', '14:09', 'mobile', 'paid', [['bis', 1]]],
+  ['04-0182', '13:58', 'cash', 'refunded', [['spa', 2], ['tom', 2], ['oig', 1], ['bag', 1]]],
+  ['04-0181', '13:51', 'card', 'paid', [['eau', 6], ['yao', 2], ['les', 2], ['the', 2]]],
+  ['04-0180', '13:44', 'cash', 'void', [['sucre', 2], ['caf', 1], ['bag', 1]]],
+  ['04-0179', '13:37', 'mobile', 'paid', [['the', 1], ['bis', 1]]],
+  ['04-0178', '13:30', 'cash', 'paid', [['riz', 1], ['huile', 2], ['oig', 3], ['tom', 4], ['bag', 1]]],
+  ['04-0177', '13:22', 'card', 'paid', [['pou', 1], ['oig', 2], ['bag', 2]]]
+];
+var MODE = { cash: 'Espèces', card: 'Carte', mobile: 'Mobile money' };
+var ST = { paid: ['Payée', '#12653F'], refunded: ['Remboursée', '#8A4106'], void: ['Annulée', '#5B636E'] };
+function fmt(n) { return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ' ') + ' FCFA'; }
+class Component extends DCLogic {
+  constructor(props) { super(props); this.state = { q: '', sel: '04-0186', status: {}, modal: false, sup: '', printed: false }; }
+  renderVals() {
+    var self = this, s = this.state;
+    var txs = TX.map(function (t) {
+      var lines = t[4].map(function (l) { var p = P[l[0]]; return { name: p[0], img: '/_blob/' + IMG[l[0]], qty: l[1], total: p[1] * l[1] }; });
+      return { id: t[0], time: t[1], mode: t[2], status: s.status[t[0]] || t[3], lines: lines,
+        n: lines.reduce(function (a, l) { return a + l.qty; }, 0), total: lines.reduce(function (a, l) { return a + l.total; }, 0) };
+    });
+    var shown = txs.filter(function (t) { return !s.q.trim() || t.id.indexOf(s.q.trim()) >= 0; });
+    var cur = txs.find(function (t) { return t.id === s.sel; }) || txs[0];
+    var canRefund = cur.status === 'paid', supOk = (s.sup || '').length >= 4;
+    return {
+      q: s.q, onQ: function (e) { self.setState({ q: e.target.value }); },
+      rows: shown.map(function (t) {
+        var on = t.id === cur.id;
+        return { id: t.id, time: t.time, mode: MODE[t.mode], total: fmt(t.total), status: ST[t.status][0], stColor: ST[t.status][1],
+          deco: t.status === 'void' ? 'line-through' : 'none', bg: on ? '#EAF0FC' : '#FFFFFF', on: on ? 'true' : 'false',
+          pick: function () { self.setState({ sel: t.id, printed: false }); } };
+      }),
+      d: { id: cur.id, meta: cur.time + ' · ' + MODE[cur.mode] + ' · ' + cur.n + ' articles · ' + ST[cur.status][0],
+        total: fmt(cur.total), lines: cur.lines.map(function (l) { return { name: l.name, img: l.img, qty: l.qty, total: fmt(l.total) }; }) },
+      reprint: function () { self.setState({ printed: true }); },
+      reprintLabel: s.printed ? 'Imprimé ✓' : 'Réimprimer',
+      cantRefund: !canRefund,
+      refundStyle: canRefund ? 'border: 0; background: #B42318; color: #FFFFFF' : 'border: 0; background: #E3E6EA; color: #6B7280',
+      askRefund: function () { if (canRefund) self.setState({ modal: true, sup: '' }); },
+      modal: s.modal,
+      sup: s.sup, onSup: function (e) { self.setState({ sup: e.target.value }); },
+      supLocked: !supOk,
+      confirmStyle: supOk ? 'background: #B42318; color: #FFFFFF' : 'background: #E3E6EA; color: #6B7280',
+      closeModal: function () { self.setState({ modal: false }); },
+      confirm: function () { if (!supOk) return; var st = Object.assign({}, s.status); st[cur.id] = 'refunded'; self.setState({ status: st, modal: false }); }
+    };
+  }
+}
+</script>
+
+
+</body></html>

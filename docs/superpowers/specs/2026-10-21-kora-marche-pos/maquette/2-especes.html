@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="fr"><head>
+<meta charset="utf-8">
+<title>Caisse — Paiement en espèces</title>
+<script src="ASSET:5dea83ff:text/javascript"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&amp;display=swap">
+<style>
+body{margin:0}
+*{box-sizing:border-box}
+button,input,a{font-family:inherit}
+button{cursor:pointer}
+button:disabled{cursor:not-allowed}
+button:focus-visible,a:focus-visible,input:focus-visible{outline:2px solid #1E56C8;outline-offset:2px}
+a{color:#1E56C8}a:hover{color:#163F94}
+</style>
+</helmet>
+<div style="width: 1366px; height: 768px; position: relative; overflow: hidden; display: flex; flex-direction: column; background: #F2F3F5; color: #16191D; font-family: 'IBM Plex Sans', system-ui, sans-serif; font-variant-numeric: tabular-nums">
+<header style="height: 56px; flex: none; display: flex; align-items: center; gap: 20px; padding: 0 20px; background: #16191D; color: #FFFFFF">
+<span style="font-size: 18px; font-weight: 700">Kora Marché</span>
+<span style="font-size: 14px; color: #C4CAD3">Caisse 04 · Awa Ndiaye</span>
+<div style="flex: 1"></div>
+<span style="font-size: 18px; font-weight: 600">14:32</span>
+</header>
+<div style="flex: 1; display: flex; gap: 16px; padding: 16px">
+<div style="flex: 1; border-radius: 12px; background: #FFFFFF; border: 1px solid #E1E4E8"></div>
+<div style="width: 420px; border-radius: 12px; background: #FFFFFF; border: 1px solid #E1E4E8"></div>
+</div>
+
+<div style="position: absolute; inset: 0; background: rgba(22, 25, 29, 0.5); display: flex; align-items: center; justify-content: center">
+<div role="dialog" aria-modal="true" aria-label="Paiement en espèces" style="width: 520px; background: #FFFFFF; border-radius: 16px; padding: 28px; display: flex; flex-direction: column; gap: 18px">
+<span style="font-size: 22px; font-weight: 600">Paiement en espèces</span>
+<div style="display: flex; justify-content: space-between; align-items: baseline; font-size: 17px"><span style="color: #4A515B">À payer</span><strong style="font-size: 30px">17 025 FCFA</strong></div>
+<label style="display: flex; flex-direction: column; gap: 6px; font-size: 15px; color: #4A515B">Montant reçu
+<input value="{{recvStr}}" sc-camel-on-change="{{onRecv}}" placeholder="0" style="height: 64px; padding: 0 16px; border: 2px solid #1E56C8; border-radius: 10px; text-align: right; font-size: 32px; font-weight: 600; color: #16191D; outline: none">
+</label>
+<div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px">
+<sc-for list="{{quick}}" as="q" hint-placeholder-count="4">
+<button type="button" sc-camel-on-click="{{q.pick}}" style="height: 52px; border-radius: 10px; border: 1px solid #D5DAE0; background: #F5F6F8; color: #16191D; font-size: 16px; font-weight: 600">{{q.label}}</button>
+</sc-for>
+</div>
+<div style="display: flex; justify-content: space-between; align-items: baseline; padding: 16px; border-radius: 10px; background: {{changeBg}}"><span style="font-size: 17px; font-weight: 600; color: {{changeFg}}">{{changeLabel}}</span><strong style="font-size: 32px; color: {{changeFg}}">{{changeValue}}</strong></div>
+<div style="display: grid; grid-template-columns: 1fr 2fr; gap: 10px">
+<a href="Main.dc.html" style="height: 60px; display: flex; align-items: center; justify-content: center; border-radius: 10px; border: 1px solid #D5DAE0; background: #FFFFFF; color: #16191D; font-size: 17px; font-weight: 600; text-decoration: none">Retour</a>
+<button type="button" sc-camel-on-click="{{validate}}" disabled="{{short}}" style="height: 60px; border: 0; border-radius: 10px; font-size: 18px; font-weight: 700; {{btnStyle}}">{{btnLabel}}</button>
+</div>
+</div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script="" data-props="{&quot;$preview&quot;:{&quot;width&quot;:1366,&quot;height&quot;:768}}">
+var TOTAL = 17025;
+function sp(n) { return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ' '); }
+class Component extends DCLogic {
+  constructor(props) { super(props); this.state = { recv: 20000, done: false }; }
+  renderVals() {
+    var self = this, s = this.state;
+    var short = s.recv < TOTAL, change = s.recv - TOTAL;
+    return {
+      recvStr: s.recv ? sp(s.recv) : '',
+      onRecv: function (e) { self.setState({ recv: parseInt(String(e.target.value).replace(/\D/g, ''), 10) || 0, done: false }); },
+      quick: [[TOTAL, 'Exact'], [20000, '20 000'], [25000, '25 000'], [50000, '50 000']].map(function (q) {
+        return { label: q[1], pick: function () { self.setState({ recv: q[0], done: false }); } };
+      }),
+      changeLabel: short ? 'Il manque' : 'Monnaie à rendre',
+      changeValue: sp(Math.abs(change)) + ' FCFA',
+      changeBg: short ? '#FDECEA' : '#E8F5EE', changeFg: short ? '#A61B12' : '#12653F',
+      short: short,
+      validate: function () { if (!short) self.setState({ done: true }); },
+      btnLabel: s.done ? 'Validé — tiroir ouvert' : 'Valider',
+      btnStyle: short ? 'background: #E3E6EA; color: #6B7280' : (s.done ? 'background: #12784A; color: #FFFFFF' : 'background: #1E56C8; color: #FFFFFF')
+    };
+  }
+}
+</script>
+
+
+</body></html>

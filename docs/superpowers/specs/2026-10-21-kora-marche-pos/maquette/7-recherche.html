@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="fr"><head>
+<meta charset="utf-8">
+<title>Caisse — Recherche de produits</title>
+<script src="ASSET:efd35837:text/javascript"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&amp;display=swap">
+<style>
+body{margin:0}
+*{box-sizing:border-box}
+button,input,a{font-family:inherit}
+button{cursor:pointer}
+button:disabled{cursor:not-allowed}
+button:focus-visible,a:focus-visible,input:focus-visible{outline:2px solid #1E56C8;outline-offset:2px}
+a{color:#1E56C8}a:hover{color:#163F94}
+</style>
+</helmet>
+<div style="width: 1366px; height: 768px; position: relative; overflow: hidden; display: flex; flex-direction: column; background: #F2F3F5; color: #16191D; font-family: 'IBM Plex Sans', system-ui, sans-serif; font-variant-numeric: tabular-nums">
+<header style="height: 56px; flex: none; display: flex; align-items: center; gap: 20px; padding: 0 12px 0 20px; background: #16191D; color: #FFFFFF">
+<span style="font-size: 18px; font-weight: 700">Kora Marché</span>
+<span style="font-size: 14px; color: #C4CAD3">Caisse 04 · Awa Ndiaye</span>
+<div style="flex: 1"></div>
+<span style="font-size: 18px; font-weight: 600">14:32</span>
+<a href="Main.dc.html" style="height: 40px; display: flex; align-items: center; padding: 0 16px; border-radius: 8px; background: #FFFFFF; color: #16191D; font-size: 15px; font-weight: 600; text-decoration: none">Retour à la vente</a>
+</header>
+
+<main style="flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 16px; padding: 24px 120px">
+<h1 style="margin: 0; font-size: 24px; font-weight: 600">Rechercher un article</h1>
+<label style="display: flex; align-items: center; gap: 12px; height: 64px; padding: 0 20px; background: #FFFFFF; border: 2px solid #1E56C8; border-radius: 12px; color: #1E56C8">
+<svg width="24" height="24" sc-camel-view-box="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.3-4.3"></path></svg>
+<input value="{{q}}" sc-camel-on-change="{{onQ}}" aria-label="Nom ou code de l'article" placeholder="Nom ou code de l'article" style="flex: 1; min-width: 0; height: 100%; border: 0; outline: none; background: transparent; font-size: 20px; color: #16191D">
+</label>
+<span style="font-size: 15px; color: #5B636E">{{count}}</span>
+<section aria-label="Résultats" style="flex: 1; min-height: 0; overflow-y: auto; background: #FFFFFF; border: 1px solid #E1E4E8; border-radius: 12px">
+<sc-for list="{{results}}" as="p" hint-placeholder-count="6">
+<div style="display: flex; align-items: center; gap: 20px; min-height: 84px; padding: 10px 20px; border-bottom: 1px solid #EEF0F3">
+<img src="{{p.img}}" alt="" style="width: 64px; height: 64px; flex: none; border-radius: 10px; background: #F5F6F8; object-fit: contain; padding: 6px">
+<div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px"><span style="font-size: 18px; font-weight: 500">{{p.name}}</span><span style="font-size: 14px; color: {{p.stockColor}}">{{p.stock}}</span></div>
+<span style="font-size: 19px; font-weight: 600">{{p.price}}</span>
+<button type="button" sc-camel-on-click="{{p.add}}" disabled="{{p.out}}" style="width: 150px; height: 48px; border: 0; border-radius: 10px; font-size: 16px; font-weight: 600; {{p.style}}">{{p.btn}}</button>
+</div>
+</sc-for>
+<sc-if value="{{none}}" hint-placeholder-val="{{false}}">
+<div style="padding: 48px 20px; text-align: center; font-size: 17px; color: #5B636E">Aucun article trouvé. Vérifiez l'orthographe ou le code.</div>
+</sc-if>
+</section>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script="" data-props="{&quot;$preview&quot;:{&quot;width&quot;:1366,&quot;height&quot;:768}}">
+var CATALOG = [
+  ['Lait en poudre 400 g', 2350, 34, '8a13aa0a150494b5dffb327f2df6d028'], ['Lait en poudre 900 g', 4900, 12, '72ca252a4a23c0d4eb88a93c0776eea1'],
+  ['Lait concentré sucré 397 g', 850, 3, '6a87c43dd73c6af4db40255bf70c4649'], ['Lait UHT 1 L', 1100, 48, 'b0189438c5917bd812a9923fe8916962'],
+  ['Lait caillé 500 g', 900, 0, '394a3d6e10156421f5af5b3cad4b7657'], ['Yaourt nature × 4', 1500, 22, 'a26dcc7eeb0d26787112b01ca21a145c'],
+  ['Riz parfumé 5 kg', 4750, 61, '6bc663a33d5ed3802099cd456d94d5aa'], ['Huile d\'arachide 1 L', 1600, 40, '18a7b09926f3d174c085940254c41891'],
+  ['Sucre en morceaux 1 kg', 800, 75, 'b8690131518e7844fcb8974744768cc1'], ['Eau minérale 1,5 L', 400, 230, 'ab91540a9ebc04b701c8736bb9e2c2ee'],
+  ['Baguette', 175, 140, '88de880307584d18f4a5da36cd015e79'], ['Café moulu 250 g', 1900, 5, 'ced9eb6d0ba34786f853f1e96d651520'],
+  ['Savon de ménage 400 g', 450, 36, '2f40c6c83f8250c83b9683a0d72ef607']
+];
+function fmt(n) { return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ' ') + ' FCFA'; }
+function norm(s) { return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, ''); }
+class Component extends DCLogic {
+  constructor(props) { super(props); this.state = { q: 'lait', added: null }; }
+  renderVals() {
+    var self = this, s = this.state, nq = norm(s.q.trim());
+    var res = CATALOG.filter(function (p) { return !nq || norm(p[0]).indexOf(nq) >= 0; });
+    return {
+      q: s.q, onQ: function (e) { self.setState({ q: e.target.value, added: null }); },
+      count: res.length + (res.length > 1 ? ' articles' : ' article'),
+      none: res.length === 0,
+      results: res.map(function (p) {
+        var out = p[2] === 0, low = p[2] > 0 && p[2] <= 5, done = s.added === p[0];
+        return {
+          name: p[0], img: '/_blob/' + p[3], price: fmt(p[1]), out: out,
+          stock: out ? 'Rupture de stock' : (low ? 'Plus que ' + p[2] + ' en stock' : 'En stock'),
+          stockColor: out ? '#A61B12' : (low ? '#8A4106' : '#12653F'),
+          btn: out ? 'Indisponible' : (done ? 'Ajouté ✓' : 'Ajouter'),
+          style: out ? 'background: #E3E6EA; color: #6B7280' : (done ? 'background: #12784A; color: #FFFFFF' : 'background: #1E56C8; color: #FFFFFF'),
+          add: function () { if (!out) self.setState({ added: p[0] }); }
+        };
+      })
+    };
+  }
+}
+</script>
+
+
+</body></html>

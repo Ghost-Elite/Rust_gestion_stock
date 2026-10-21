@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="fr"><head>
+<meta charset="utf-8">
+<title>Caisse — Vente</title>
+<script src="ASSET:72a50a25:text/javascript"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&amp;display=swap">
+<style>
+body{margin:0}
+*{box-sizing:border-box}
+button,input,a{font-family:inherit}
+button{cursor:pointer}
+button:disabled{cursor:not-allowed}
+button:focus-visible,a:focus-visible,input:focus-visible{outline:2px solid #1E56C8;outline-offset:2px}
+a{color:#1E56C8}a:hover{color:#163F94}
+</style>
+</helmet>
+<div style="width: 1366px; height: 768px; position: relative; overflow: hidden; display: flex; flex-direction: column; background: #F2F3F5; color: #16191D; font-family: 'IBM Plex Sans', system-ui, sans-serif; font-variant-numeric: tabular-nums">
+
+<header style="height: 56px; flex: none; display: flex; align-items: center; gap: 20px; padding: 0 20px; background: #16191D; color: #FFFFFF">
+<span style="font-size: 18px; font-weight: 700">Kora Marché</span>
+<span style="font-size: 14px; color: #C4CAD3">Caisse 04 · Awa Ndiaye</span>
+<div style="flex: 1"></div>
+<span style="display: flex; align-items: center; gap: 8px; font-size: 14px; color: {{statusColor}}"><span style="width: 8px; height: 8px; border-radius: 50%; background: {{statusColor}}"></span>{{statusLabel}}</span>
+<span style="font-size: 18px; font-weight: 600">{{clock}}</span>
+</header>
+
+<div style="flex: 1; min-height: 0; display: flex; gap: 16px; padding: 16px 16px 0">
+
+<section aria-label="Ticket en cours" style="flex: 1; min-width: 0; display: flex; flex-direction: column; background: #FFFFFF; border: 1px solid #E1E4E8; border-radius: 12px; overflow: hidden">
+<div style="padding: 14px; border-bottom: 1px solid #E1E4E8">
+<label style="display: flex; align-items: center; gap: 10px; height: 56px; padding: 0 8px 0 16px; border: 2px solid #1E56C8; border-radius: 10px; color: #1E56C8">
+<svg width="24" height="24" sc-camel-view-box="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7V5a2 2 0 0 1 2-2h2"></path><path d="M17 3h2a2 2 0 0 1 2 2v2"></path><path d="M21 17v2a2 2 0 0 1-2 2h-2"></path><path d="M7 21H5a2 2 0 0 1-2-2v-2"></path><path d="M8 7v10M12 7v10M16 7v10"></path></svg>
+<input ref="{{setScanRef}}" value="{{scan}}" sc-camel-on-change="{{onScanChange}}" sc-camel-on-key-down="{{onScanKey}}" aria-label="Code-barres ou nom du produit" placeholder="Scannez un article ou tapez son code" style="flex: 1; min-width: 0; height: 100%; border: 0; outline: none; background: transparent; font-size: 18px; color: #16191D">
+<button type="button" sc-camel-on-click="{{simulate}}" style="height: 40px; padding: 0 14px; border: 0; border-radius: 8px; background: #EEF0F3; color: #3F4650; font-size: 14px; font-weight: 600">Simuler un scan</button>
+</label>
+</div>
+
+<div style="flex: 1; min-height: 0; overflow-y: auto">
+<sc-if value="{{hasLines}}" hint-placeholder-val="{{true}}">
+<sc-for list="{{lines}}" as="l" hint-placeholder-count="7">
+<div style="display: flex; align-items: center; gap: 16px; min-height: 68px; padding: 8px 20px; border-bottom: 1px solid #EEF0F3; background: {{l.bg}}">
+<img src="{{l.img}}" alt="" style="width: 52px; height: 52px; flex: none; border-radius: 8px; background: #F5F6F8; object-fit: contain; padding: 4px">
+<button type="button" sc-camel-on-click="{{l.select}}" style="flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 0; border: 0; background: transparent; color: #16191D; text-align: left">
+<span style="max-width: 100%; font-size: 17px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{l.name}}</span>
+<span style="font-size: 14px; color: #5B636E">{{l.detail}}</span>
+</button>
+<sc-if value="{{l.selected}}" hint-placeholder-val="{{false}}">
+<div style="display: flex; align-items: center; gap: 6px">
+<button type="button" sc-camel-on-click="{{l.dec}}" aria-label="Retirer une unité" style="width: 44px; height: 44px; border-radius: 8px; border: 1px solid #C9CED6; background: #FFFFFF; color: #16191D; font-size: 22px">−</button>
+<span style="width: 36px; text-align: center; font-size: 18px; font-weight: 600">{{l.qty}}</span>
+<button type="button" sc-camel-on-click="{{l.inc}}" aria-label="Ajouter une unité" style="width: 44px; height: 44px; border-radius: 8px; border: 1px solid #C9CED6; background: #FFFFFF; color: #16191D; font-size: 22px">+</button>
+</div>
+</sc-if>
+<span style="width: 120px; text-align: right; font-size: 18px; font-weight: 600">{{l.total}}</span>
+</div>
+</sc-for>
+</sc-if>
+<sc-if value="{{isEmpty}}" hint-placeholder-val="{{false}}">
+<div style="height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; color: #5B636E; text-align: center">
+<span style="font-size: 22px; font-weight: 600; color: #16191D">Prêt pour une nouvelle vente</span>
+<span style="font-size: 16px">Scannez le premier article pour commencer.</span>
+</div>
+</sc-if>
+</div>
+<div style="flex: none; display: flex; justify-content: space-between; padding: 12px 20px; border-top: 1px solid #E1E4E8; font-size: 15px; color: #5B636E">
+<span>{{itemCount}} articles</span>
+<span>{{clientLabel}}</span>
+</div>
+</section>
+
+<aside aria-label="Paiement" style="width: 420px; flex: none; display: flex; flex-direction: column; gap: 12px">
+<div style="background: #FFFFFF; border: 1px solid #E1E4E8; border-radius: 12px; padding: 20px; display: flex; flex-direction: column; gap: 10px">
+<div style="display: flex; justify-content: space-between; font-size: 16px; color: #4A515B"><span>Sous-total</span><span>{{subtotal}}</span></div>
+<sc-if value="{{hasDiscount}}" hint-placeholder-val="{{true}}"><div style="display: flex; justify-content: space-between; font-size: 16px; color: #12653F"><span>Remises</span><span>{{discounts}}</span></div></sc-if>
+<div style="height: 1px; background: #E1E4E8; margin: 4px 0"></div>
+<div style="font-size: 16px; font-weight: 600; color: #4A515B">TOTAL</div>
+<div style="text-align: right; font-size: 64px; line-height: 1; font-weight: 700; letter-spacing: -0.02em">{{totalNum}} <span style="font-size: 24px; font-weight: 500; color: #5B636E">{{unit}}</span></div>
+<div style="text-align: right; font-size: 13px; color: #5B636E">TVA 18 % incluse : {{tva}}</div>
+</div>
+
+<button type="button" sc-camel-on-click="{{payCash}}" disabled="{{empty}}" style="height: 84px; border: 0; border-radius: 12px; font-size: 22px; font-weight: 400; background-color: #1e56c8; color: #ffffff">Espèces</button>
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px">
+<button type="button" sc-camel-on-click="{{payCard}}" disabled="{{empty}}" style="height: 72px; border-radius: 12px; font-size: 19px; font-weight: 600; {{secondaryStyle}}">Carte</button>
+<button type="button" sc-camel-on-click="{{payMobile}}" disabled="{{empty}}" style="height: 72px; border-radius: 12px; font-size: 19px; font-weight: 600; {{secondaryStyle}}">Mobile money</button>
+</div>
+</aside>
+</div>
+
+<nav aria-label="Fonctions" style="flex: none; display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 10px; padding: 16px">
+<a href="Recherche.dc.html" style="height: 64px; display: flex; flex-direction: column; align-items: center; justify-content: center; border-radius: 10px; border: 1px solid #D5DAE0; background: #FFFFFF; color: #16191D; text-decoration: none; font-size: 15px; font-weight: 600">Rechercher<span style="font-size: 12px; font-weight: 500; color: #5B636E">F2</span></a>
+<button type="button" sc-camel-on-click="{{toggleClient}}" style="height: 64px; display: flex; flex-direction: column; align-items: center; justify-content: center; border-radius: 10px; border: 1px solid #D5DAE0; background: #FFFFFF; color: #16191D; font-size: 15px; font-weight: 600">Carte fidélité<span style="font-size: 12px; font-weight: 500; color: #5B636E">F4</span></button>
+<button type="button" sc-camel-on-click="{{openDisc}}" disabled="{{noSel}}" style="height: 64px; display: flex; flex-direction: column; align-items: center; justify-content: center; border-radius: 10px; border: 1px solid #D5DAE0; background: #FFFFFF; font-size: 15px; font-weight: 600; color: {{selBtnColor}}">Remise<span style="font-size: 12px; font-weight: 500; color: #5B636E">F5</span></button>
+<button type="button" sc-camel-on-click="{{askRemove}}" disabled="{{noSel}}" style="height: 64px; display: flex; flex-direction: column; align-items: center; justify-content: center; border-radius: 10px; border: 1px solid #D5DAE0; background: #FFFFFF; font-size: 15px; font-weight: 600; color: {{selBtnColor}}">Supprimer l'article<span style="font-size: 12px; font-weight: 500; color: #5B636E">Suppr</span></button>
+<button type="button" sc-camel-on-click="{{suspend}}" style="height: 64px; display: flex; flex-direction: column; align-items: center; justify-content: center; border-radius: 10px; border: 1px solid #D5DAE0; background: #FFFFFF; color: #16191D; font-size: 15px; font-weight: 600">{{suspendLabel}}<span style="font-size: 12px; font-weight: 500; color: #5B636E">F8</span></button>
+<button type="button" sc-camel-on-click="{{askCancel}}" style="height: 64px; display: flex; flex-direction: column; align-items: center; justify-content: center; border-radius: 10px; border: 1px solid #E8B4AE; background: #FFFFFF; color: #A61B12; font-size: 15px; font-weight: 600">Annuler la vente<span style="font-size: 12px; font-weight: 500; color: #5B636E">Échap</span></button>
+<a href="Historique.dc.html" style="height: 64px; display: flex; flex-direction: column; align-items: center; justify-content: center; border-radius: 10px; border: 1px solid #D5DAE0; background: #FFFFFF; color: #16191D; text-decoration: none; font-size: 15px; font-weight: 600">Menu<span style="font-size: 12px; font-weight: 500; color: #5B636E">Historique, caisse…</span></a>
+</nav>
+
+<sc-if value="{{hasToast}}" hint-placeholder-val="{{false}}">
+<div role="status" style="position: absolute; left: 50%; bottom: 104px; transform: translateX(-50%); padding: 12px 18px; border-radius: 10px; background: #16191D; color: #FFFFFF; font-size: 15px; white-space: nowrap">{{toast}}</div>
+</sc-if>
+
+<sc-if value="{{modalCash}}" hint-placeholder-val="{{false}}">
+<div style="position: absolute; inset: 0; background: rgba(22, 25, 29, 0.5); display: flex; align-items: center; justify-content: center">
+<div role="dialog" aria-modal="true" aria-label="Paiement en espèces" style="width: 520px; background: #FFFFFF; border-radius: 16px; padding: 28px; display: flex; flex-direction: column; gap: 18px">
+<span style="font-size: 22px; font-weight: 600">Paiement en espèces</span>
+<div style="display: flex; justify-content: space-between; align-items: baseline; font-size: 17px"><span style="color: #4A515B">À payer</span><strong style="font-size: 30px">{{totalFull}}</strong></div>
+<label style="display: flex; flex-direction: column; gap: 6px; font-size: 15px; color: #4A515B">Montant reçu
+<input value="{{recvStr}}" sc-camel-on-change="{{onRecv}}" placeholder="0" style="height: 64px; padding: 0 16px; border: 2px solid #1E56C8; border-radius: 10px; text-align: right; font-size: 32px; font-weight: 600; color: #16191D; outline: none">
+</label>
+<div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px">
+<sc-for list="{{quickAmounts}}" as="qa" hint-placeholder-count="4">
+<button type="button" sc-camel-on-click="{{qa.pick}}" style="height: 52px; border-radius: 10px; border: 1px solid #D5DAE0; background: #F5F6F8; color: #16191D; font-size: 16px; font-weight: 600">{{qa.label}}</button>
+</sc-for>
+</div>
+<div style="display: flex; justify-content: space-between; align-items: baseline; padding: 16px; border-radius: 10px; background: {{changeBg}}"><span style="font-size: 17px; font-weight: 600; color: {{changeFg}}">{{changeLabel}}</span><strong style="font-size: 32px; color: {{changeFg}}">{{changeValue}}</strong></div>
+<div style="display: grid; grid-template-columns: 1fr 2fr; gap: 10px">
+<button type="button" sc-camel-on-click="{{closeModal}}" style="height: 60px; border-radius: 10px; border: 1px solid #D5DAE0; background: #FFFFFF; color: #16191D; font-size: 17px; font-weight: 600">Retour</button>
+<button type="button" sc-camel-on-click="{{confirmCash}}" disabled="{{cashShort}}" style="height: 60px; border: 0; border-radius: 10px; font-size: 18px; font-weight: 700; {{cashBtnStyle}}">Valider</button>
+</div>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{modalTerminal}}" hint-placeholder-val="{{false}}">
+<div style="position: absolute; inset: 0; background: rgba(22, 25, 29, 0.5); display: flex; align-items: center; justify-content: center">
+<div role="dialog" aria-modal="true" aria-label="Paiement électronique" style="width: 480px; background: #FFFFFF; border-radius: 16px; padding: 32px 28px 28px; display: flex; flex-direction: column; align-items: center; gap: 16px; text-align: center">
+<span style="font-size: 22px; font-weight: 600">{{terminalTitle}}</span>
+<strong style="font-size: 40px">{{totalFull}}</strong>
+<span style="font-size: 16px; color: #4A515B">{{terminalText}}</span>
+<button type="button" sc-camel-on-click="{{confirmTerminal}}" style="width: 100%; height: 56px; border-radius: 10px; border: 1px dashed #AEB5BF; background: #FFFFFF; color: #3F4650; font-size: 15px; font-weight: 600">Simuler : paiement accepté</button>
+<button type="button" sc-camel-on-click="{{closeModal}}" style="width: 100%; height: 56px; border-radius: 10px; border: 1px solid #D5DAE0; background: #FFFFFF; color: #16191D; font-size: 17px; font-weight: 600">Annuler</button>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{modalSuccess}}" hint-placeholder-val="{{false}}">
+<div style="position: absolute; inset: 0; background: rgba(22, 25, 29, 0.5); display: flex; align-items: center; justify-content: center">
+<div role="dialog" aria-modal="true" aria-label="Vente terminée" style="width: 480px; background: #FFFFFF; border-radius: 16px; padding: 32px 28px 28px; display: flex; flex-direction: column; align-items: center; gap: 14px; text-align: center">
+<div style="width: 64px; height: 64px; border-radius: 50%; background: #E8F5EE; color: #12653F; display: flex; align-items: center; justify-content: center"><svg width="32" height="32" sc-camel-view-box="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"></path></svg></div>
+<span style="font-size: 22px; font-weight: 600">Vente terminée</span>
+<span style="font-size: 16px; color: #4A515B">{{saleLabel}}</span>
+<sc-if value="{{saleHasChange}}" hint-placeholder-val="{{true}}"><div style="display: flex; flex-direction: column; gap: 2px"><span style="font-size: 16px; color: #4A515B">Monnaie à rendre</span><strong style="font-size: 44px; color: #12653F">{{saleChange}}</strong></div></sc-if>
+<button type="button" sc-camel-on-click="{{newSale}}" style="width: 100%; height: 60px; border: 0; border-radius: 10px; background: #1E56C8; color: #FFFFFF; font-size: 18px; font-weight: 700">Nouvelle vente</button>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{modalConfirm}}" hint-placeholder-val="{{false}}">
+<div style="position: absolute; inset: 0; background: rgba(22, 25, 29, 0.5); display: flex; align-items: center; justify-content: center">
+<div role="alertdialog" aria-modal="true" aria-label="{{confirmTitle}}" style="width: 460px; background: #FFFFFF; border-radius: 16px; padding: 28px; display: flex; flex-direction: column; gap: 14px">
+<span style="font-size: 22px; font-weight: 600">{{confirmTitle}}</span>
+<span style="font-size: 16px; line-height: 1.5; color: #4A515B">{{confirmText}}</span>
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 6px">
+<button type="button" sc-camel-on-click="{{closeModal}}" style="height: 56px; border-radius: 10px; border: 1px solid #D5DAE0; background: #FFFFFF; color: #16191D; font-size: 17px; font-weight: 600">Non, revenir</button>
+<button type="button" sc-camel-on-click="{{confirmYes}}" style="height: 56px; border: 0; border-radius: 10px; background: #B42318; color: #FFFFFF; font-size: 17px; font-weight: 600">{{confirmYesLabel}}</button>
+</div>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{modalDisc}}" hint-placeholder-val="{{false}}">
+<div style="position: absolute; inset: 0; background: rgba(22, 25, 29, 0.5); display: flex; align-items: center; justify-content: center">
+<div role="dialog" aria-modal="true" aria-label="Remise" style="width: 480px; background: #FFFFFF; border-radius: 16px; padding: 28px; display: flex; flex-direction: column; gap: 16px">
+<div style="display: flex; flex-direction: column; gap: 4px"><span style="font-size: 22px; font-weight: 600">Remise</span><span style="font-size: 16px; color: #4A515B">{{selName}}</span></div>
+<div style="display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px">
+<sc-for list="{{discOptions}}" as="d" hint-placeholder-count="5"><button type="button" sc-camel-on-click="{{d.pick}}" style="height: 56px; border-radius: 10px; font-size: 17px; font-weight: 600; {{d.style}}">{{d.label}}</button></sc-for>
+</div>
+<sc-if value="{{needSup}}" hint-placeholder-val="{{false}}">
+<label style="display: flex; flex-direction: column; gap: 6px; font-size: 15px; color: #4A515B">Code superviseur (au-delà de 10 %)
+<input type="password" value="{{supCode}}" sc-camel-on-change="{{onSup}}" placeholder="••••" style="height: 52px; padding: 0 14px; border: 1px solid #AEB5BF; border-radius: 10px; font-size: 20px; letter-spacing: 0.2em; outline: none">
+</label>
+</sc-if>
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px">
+<button type="button" sc-camel-on-click="{{closeModal}}" style="height: 56px; border-radius: 10px; border: 1px solid #D5DAE0; background: #FFFFFF; color: #16191D; font-size: 17px; font-weight: 600">Annuler</button>
+<button type="button" sc-camel-on-click="{{applyDisc}}" disabled="{{discLocked}}" style="height: 56px; border: 0; border-radius: 10px; font-size: 17px; font-weight: 600; {{discApplyStyle}}">Appliquer</button>
+</div>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{modalNotFound}}" hint-placeholder-val="{{false}}">
+<div style="position: absolute; inset: 0; background: rgba(22, 25, 29, 0.5); display: flex; align-items: center; justify-content: center">
+<div role="alertdialog" aria-modal="true" aria-label="Article introuvable" style="width: 460px; background: #FFFFFF; border-radius: 16px; padding: 28px; display: flex; flex-direction: column; gap: 14px">
+<span style="font-size: 22px; font-weight: 600">Article introuvable</span>
+<span style="font-size: 16px; line-height: 1.5; color: #4A515B">Le code « {{nf}} » n'existe pas dans le catalogue. Scannez à nouveau ou recherchez l'article par son nom.</span>
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 6px">
+<button type="button" sc-camel-on-click="{{closeModal}}" style="height: 56px; border-radius: 10px; border: 1px solid #D5DAE0; background: #FFFFFF; color: #16191D; font-size: 17px; font-weight: 600">Scanner à nouveau</button>
+<a href="Recherche.dc.html" style="height: 56px; display: flex; align-items: center; justify-content: center; border-radius: 10px; background: #1E56C8; color: #FFFFFF; font-size: 17px; font-weight: 600; text-decoration: none">Rechercher</a>
+</div>
+</div>
+</div>
+</sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script="" data-props="{&quot;devise&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;FCFA&quot;,&quot;EUR&quot;,&quot;USD&quot;],&quot;default&quot;:&quot;FCFA&quot;},&quot;horsLigne&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false},&quot;panier&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;Rempli&quot;,&quot;Vide&quot;],&quot;default&quot;:&quot;Rempli&quot;},&quot;$preview&quot;:{&quot;width&quot;:1366,&quot;height&quot;:768}}">
+var CATALOG = [
+  { id: 'p01', ean: '6044000120015', name: 'Riz parfumé 5 kg', price: 4750 },
+  { id: 'p02', ean: '6044000230127', name: 'Huile d\'arachide 1 L', price: 1600 },
+  { id: 'p03', ean: '6044000340219', name: 'Lait en poudre 400 g', price: 2350 },
+  { id: 'p04', ean: '6044000450301', name: 'Sucre en morceaux 1 kg', price: 800 },
+  { id: 'p05', ean: '6044000560403', name: 'Eau minérale 1,5 L', price: 400 },
+  { id: 'p06', ean: '2000000001753', name: 'Baguette', price: 175 },
+  { id: 'p07', ean: '6044000670515', name: 'Spaghetti 500 g', price: 650 },
+  { id: 'p08', ean: '6044000780617', name: 'Concentré de tomate 400 g', price: 700 },
+  { id: 'p09', ean: '6044000890719', name: 'Yaourt nature × 4', price: 1500 },
+  { id: 'p10', ean: '6044000900811', name: 'Jus de bissap 1 L', price: 1000 },
+  { id: 'p11', ean: '6044001010913', name: 'Thé vert 200 g', price: 1250 },
+  { id: 'p12', ean: '6044001121015', name: 'Lessive en poudre 1 kg', price: 1150 },
+  { id: 'p13', ean: '2000000012209', name: 'Poulet entier', price: 3400 },
+  { id: 'p14', ean: '2000000020051', name: 'Oignons 1 kg', price: 650 },
+  { id: 'p16', ean: '6044001341219', name: 'Café moulu 250 g', price: 1900 }
+];
+var IMG = {
+  p01: '/_blob/6bc663a33d5ed3802099cd456d94d5aa', p02: '/_blob/18a7b09926f3d174c085940254c41891', p03: '/_blob/8a13aa0a150494b5dffb327f2df6d028',
+  p04: '/_blob/b8690131518e7844fcb8974744768cc1', p05: '/_blob/ab91540a9ebc04b701c8736bb9e2c2ee', p06: '/_blob/88de880307584d18f4a5da36cd015e79',
+  p07: '/_blob/b7dd1d33d2c54abaed5df2742c7ab063', p08: '/_blob/229b85a4422ff10626537151ce98be92', p09: '/_blob/a26dcc7eeb0d26787112b01ca21a145c',
+  p10: '/_blob/b6185d3b2e74c443566af67a606cd4e0', p11: '/_blob/e11d3b05fe52f41ef99ec2afe7e55515', p12: '/_blob/694dc608bbd478f35ae2957cb8e8f3b1',
+  p13: '/_blob/3133aacfbfa0c4de01e7b23e96a534ad', p14: '/_blob/cc87706aa5f7421486a6dbd1fa1d4039', p16: '/_blob/ced9eb6d0ba34786f853f1e96d651520'
+};
+var BYID = {};
+CATALOG.forEach(function (p) { BYID[p.id] = p; });
+var CUR = { FCFA: { rate: 1, dec: 0, unit: 'FCFA' }, EUR: { rate: 655.957, dec: 2, unit: '€' }, USD: { rate: 565, dec: 2, unit: '$' } };
+
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = this.fresh(props);
+    this.scanEl = null; this.timer = null; this.toastT = null;
+  }
+  fresh(props) {
+    var demo = ((props && props.panier) || 'Rempli') !== 'Vide';
+    return {
+      cart: demo ? [{ id: 'p01', qty: 1, disc: 0 }, { id: 'p02', qty: 2, disc: 0 }, { id: 'p05', qty: 6, disc: 0 }, { id: 'p06', qty: 3, disc: 0 },
+        { id: 'p09', qty: 1, disc: 10 }, { id: 'p13', qty: 1, disc: 0 }, { id: 'p08', qty: 2, disc: 0 }] : [],
+      sel: demo ? 'p08' : null, scan: '', modal: null, recvStr: '', recvF: 0, disc: 0, supCode: '', nf: '',
+      client: demo, suspended: null, toast: '', sale: null, payKind: null, confirm: null, now: Date.now()
+    };
+  }
+  componentDidMount() { this.timer = setInterval(() => this.setState({ now: Date.now() }), 10000); this.focusScan(); }
+  componentWillUnmount() { clearInterval(this.timer); clearTimeout(this.toastT); }
+  componentDidUpdate(prev) { if (prev.panier !== this.props.panier) this.setState(this.fresh(this.props)); }
+  cur() { return CUR[this.props.devise] || CUR.FCFA; }
+  num(n) {
+    var c = this.cur(); var v = Math.abs(n / c.rate);
+    var parts = v.toFixed(c.dec).split('.');
+    return (n < 0 ? '−' : '') + parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ' ') + (parts[1] ? ',' + parts[1] : '');
+  }
+  fmt(n) { return this.num(n) + ' ' + this.cur().unit; }
+  focusScan() { var el = this.scanEl; if (el && el.focus) setTimeout(function () { try { el.focus(); } catch (e) {} }, 0); }
+  flash(msg) { clearTimeout(this.toastT); this.setState({ toast: msg }); this.toastT = setTimeout(() => this.setState({ toast: '' }), 3000); }
+  add(id, q) {
+    var cart = this.state.cart.slice();
+    var i = cart.findIndex(function (c) { return c.id === id; });
+    if (i >= 0) cart[i] = Object.assign({}, cart[i], { qty: cart[i].qty + q }); else cart.push({ id: id, qty: q, disc: 0 });
+    this.setState({ cart: cart, sel: id });
+  }
+  setQty(id, q) { this.setState({ cart: this.state.cart.map(function (c) { return c.id === id ? Object.assign({}, c, { qty: Math.max(1, q) }) : c; }) }); }
+  submitScan() {
+    var raw = (this.state.scan || '').trim(); if (!raw) return;
+    var q = 1, m = raw.match(/^(\d{1,3})\s*[*xX×]\s*(.+)$/);
+    if (m) { q = parseInt(m[1], 10) || 1; raw = m[2].trim(); }
+    var low = raw.toLowerCase();
+    var p = CATALOG.find(function (x) { return x.ean === raw; });
+    if (!p && low.length >= 3) { var hits = CATALOG.filter(function (x) { return x.name.toLowerCase().indexOf(low) >= 0; }); if (hits.length === 1) p = hits[0]; }
+    if (p) { this.add(p.id, q); this.setState({ scan: '' }); } else this.setState({ modal: 'notfound', nf: raw, scan: '' });
+  }
+  totals() {
+    var sub = 0, rem = 0, n = 0;
+    this.state.cart.forEach(function (c) { var g = BYID[c.id].price * c.qty; sub += g; rem += Math.round(g * c.disc / 100); n += c.qty; });
+    var total = sub - rem;
+    return { sub: sub, rem: rem, total: total, n: n, tva: Math.round(total - total / 1.18) };
+  }
+  clearSale() { this.setState({ cart: [], sel: null, client: false, recvStr: '', recvF: 0 }); }
+  renderVals() {
+    var s = this.state, self = this, c = this.cur(), t = this.totals();
+    var selItem = s.cart.find(function (x) { return x.id === s.sel; });
+    var lines = s.cart.map(function (ci) {
+      var p = BYID[ci.id], g = p.price * ci.qty, d = Math.round(g * ci.disc / 100), on = ci.id === s.sel;
+      return {
+        name: p.name, img: IMG[ci.id], qty: ci.qty, total: self.fmt(g - d), selected: on, bg: on ? '#EAF0FC' : '#FFFFFF',
+        detail: ci.qty + ' × ' + self.fmt(p.price) + (ci.disc ? ' · remise ' + ci.disc + ' %' : ''),
+        select: function () { self.setState({ sel: ci.id }); },
+        inc: function (e) { if (e && e.stopPropagation) e.stopPropagation(); self.setQty(ci.id, ci.qty + 1); },
+        dec: function (e) { if (e && e.stopPropagation) e.stopPropagation(); if (ci.qty > 1) self.setQty(ci.id, ci.qty - 1); }
+      };
+    });
+    var amounts = [t.total];
+    [1000, 5000, 10000, 20000, 50000].forEach(function (step) { var v = Math.ceil(t.total / step) * step; if (v > t.total && amounts.indexOf(v) < 0 && amounts.length < 4) amounts.push(v); });
+    var change = s.recvF - t.total, short = s.recvF < t.total;
+    var needSup = s.disc > 10, discLocked = needSup && (s.supCode || '').length < 4;
+    var empty = s.cart.length === 0;
+    var sale = s.sale || {};
+    var conf = s.confirm;
+    return {
+      statusLabel: this.props.horsLigne ? 'Hors ligne · 3 ventes à synchroniser' : 'En ligne',
+      statusColor: this.props.horsLigne ? '#F5B661' : '#6FD3A0',
+      clock: new Date(s.now).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }),
+      scan: s.scan,
+      setScanRef: function (el) { self.scanEl = el; },
+      onScanChange: function (e) { self.setState({ scan: e.target.value }); },
+      onScanKey: function (e) { if (e.key === 'Enter') { e.preventDefault(); self.submitScan(); } },
+      simulate: function () { var p = CATALOG[Math.floor(Math.random() * CATALOG.length)]; self.add(p.id, 1); self.focusScan(); },
+      lines: lines, hasLines: !empty, isEmpty: empty,
+      itemCount: t.n,
+      clientLabel: s.client ? 'Carte fidélité : Fatou Diop' : 'Pas de carte fidélité',
+      subtotal: self.fmt(t.sub), hasDiscount: t.rem > 0, discounts: self.fmt(-t.rem),
+      totalNum: self.num(t.total), unit: c.unit, totalFull: self.fmt(t.total), tva: self.fmt(t.tva),
+      empty: empty,
+      primaryStyle: empty ? 'background: #E3E6EA; color: #6B7280' : 'background: #1E56C8; color: #FFFFFF',
+      secondaryStyle: empty ? 'border: 1px solid #E3E6EA; background: #F5F6F8; color: #6B7280' : 'border: 2px solid #1E56C8; background: #FFFFFF; color: #1E56C8',
+      payCash: function () { if (!empty) self.setState({ modal: 'cash', recvStr: '', recvF: 0 }); },
+      payCard: function () { if (!empty) self.setState({ modal: 'terminal', payKind: 'card' }); },
+      payMobile: function () { if (!empty) self.setState({ modal: 'terminal', payKind: 'mobile' }); },
+      noSel: !selItem, selBtnColor: selItem ? '#16191D' : '#9AA1AB',
+      selName: selItem ? BYID[selItem.id].name : '',
+      toggleClient: function () { self.setState({ client: !s.client }); },
+      openDisc: function () { if (selItem) self.setState({ modal: 'disc', disc: selItem.disc, supCode: '' }); },
+      askRemove: function () { if (selItem) self.setState({ modal: 'confirm', confirm: 'remove' }); },
+      askCancel: function () { if (empty) self.flash('Aucune vente en cours'); else self.setState({ modal: 'confirm', confirm: 'cancel' }); },
+      suspendLabel: s.suspended ? 'Reprendre la vente' : 'Mettre en attente',
+      suspend: function () {
+        if (s.suspended) {
+          if (!empty) { self.flash('Terminez d\'abord la vente en cours'); return; }
+          self.setState({ cart: s.suspended.cart, client: s.suspended.client, sel: null, suspended: null }); self.flash('Vente reprise'); return;
+        }
+        if (empty) { self.flash('Aucune vente en cours'); return; }
+        self.setState({ suspended: { cart: s.cart, client: s.client } }); self.clearSale(); self.flash('Vente mise en attente');
+      },
+      hasToast: !!s.toast, toast: s.toast,
+      closeModal: function () { self.setState({ modal: null }); self.focusScan(); },
+      modalCash: s.modal === 'cash', modalTerminal: s.modal === 'terminal', modalSuccess: s.modal === 'success',
+      modalConfirm: s.modal === 'confirm', modalDisc: s.modal === 'disc', modalNotFound: s.modal === 'notfound',
+      recvStr: s.recvStr,
+      onRecv: function (e) { var raw = String(e.target.value).replace(/[^\d,.]/g, ''); self.setState({ recvStr: raw, recvF: Math.round((parseFloat(raw.replace(',', '.')) || 0) * c.rate) }); },
+      quickAmounts: amounts.map(function (v, i) { return { label: i === 0 ? 'Exact' : self.num(v), pick: function () { self.setState({ recvF: v, recvStr: (v / c.rate).toFixed(c.dec).replace('.', ',') }); } }; }),
+      changeLabel: short ? 'Il manque' : 'Monnaie à rendre',
+      changeValue: self.fmt(Math.abs(s.recvF ? change : 0)),
+      changeBg: short && s.recvF ? '#FDECEA' : '#E8F5EE', changeFg: short && s.recvF ? '#A61B12' : '#12653F',
+      cashShort: short,
+      cashBtnStyle: short ? 'background: #E3E6EA; color: #6B7280' : 'background: #1E56C8; color: #FFFFFF',
+      confirmCash: function () { if (!short) self.setState({ modal: 'success', sale: { kind: 'cash', total: t.total, change: change } }); },
+      terminalTitle: s.payKind === 'mobile' ? 'Paiement mobile' : 'Paiement par carte',
+      terminalText: s.payKind === 'mobile' ? 'Le client scanne le QR code ou valide sur son téléphone.' : 'Le client présente sa carte sur le terminal.',
+      confirmTerminal: function () { self.setState({ modal: 'success', sale: { kind: s.payKind, total: t.total, change: 0 } }); },
+      saleLabel: (sale.kind === 'cash' ? 'Espèces' : sale.kind === 'mobile' ? 'Mobile money' : 'Carte') + ' · ' + self.fmt(sale.total || 0) + ' · ticket imprimé',
+      saleHasChange: sale.kind === 'cash' && sale.change > 0, saleChange: self.fmt(sale.change || 0),
+      newSale: function () { self.setState({ modal: null, sale: null }); self.clearSale(); self.focusScan(); },
+      confirmTitle: conf === 'cancel' ? 'Annuler la vente ?' : 'Supprimer cet article ?',
+      confirmText: conf === 'cancel' ? 'Tous les articles (' + t.n + ') seront retirés du ticket.' : (selItem ? BYID[selItem.id].name + ' sera retiré du ticket.' : ''),
+      confirmYesLabel: conf === 'cancel' ? 'Oui, annuler' : 'Oui, supprimer',
+      confirmYes: function () {
+        if (conf === 'cancel') { self.clearSale(); self.setState({ modal: null }); self.flash('Vente annulée'); }
+        else { self.setState({ cart: s.cart.filter(function (x) { return x.id !== s.sel; }), sel: null, modal: null }); }
+        self.focusScan();
+      },
+      discOptions: [0, 5, 10, 15, 20].map(function (v) {
+        var on = s.disc === v;
+        return { label: v ? v + ' %' : 'Aucune', style: on ? 'border: 2px solid #1E56C8; background: #EAF0FC; color: #1E56C8' : 'border: 1px solid #D5DAE0; background: #FFFFFF; color: #16191D', pick: function () { self.setState({ disc: v }); } };
+      }),
+      needSup: needSup, supCode: s.supCode, onSup: function (e) { self.setState({ supCode: e.target.value }); },
+      discLocked: discLocked,
+      discApplyStyle: discLocked ? 'background: #E3E6EA; color: #6B7280' : 'background: #1E56C8; color: #FFFFFF',
+      applyDisc: function () { if (discLocked) return; self.setState({ cart: s.cart.map(function (x) { return x.id === s.sel ? Object.assign({}, x, { disc: s.disc }) : x; }), modal: null }); },
+      nf: s.nf
+    };
+  }
+}
+</script>
+
+
+</body></html>
