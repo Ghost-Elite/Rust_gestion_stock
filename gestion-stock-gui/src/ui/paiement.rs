@@ -22,6 +22,8 @@ use crate::textes::*;
 use eframe::egui::{
     Align, Context, CornerRadius, Frame, Key, Layout, Margin, RichText, ScrollArea, Sense, Stroke,
     TextEdit, Ui, Vec2,
+    text::{CCursor, CCursorRange},
+    text_edit::TextEditState,
 };
 use gestion_stock::monnaie::{Devise, Montant};
 use gestion_stock::vente::Moyen;
@@ -52,6 +54,34 @@ pub(crate) fn montants_rapides(devise: Devise, total: Montant) -> Vec<Montant> {
         }
     }
     montants
+}
+
+/// Regroupe par milliers la partie entière d'un montant tapé : « 20000 » devient « 20 000 » (avec
+/// l'espace fine insécable de la maquette). Ce qui n'est pas un nombre reste tel quel, pour que
+/// « Montant illisible » le dise.
+pub(crate) fn regrouper(saisie: &str) -> String {
+    let net: String = saisie
+        .chars()
+        .filter(|c| !matches!(c, ' ' | '\u{a0}' | '\u{202f}'))
+        .collect();
+    let (entier, reste) = match net.find([',', '.']) {
+        Some(i) => net.split_at(i),
+        None => (net.as_str(), ""),
+    };
+    let nombre = !entier.is_empty()
+        && entier.chars().all(|c| c.is_ascii_digit())
+        && reste.chars().skip(1).all(|c| c.is_ascii_digit());
+    if !nombre {
+        return saisie.to_string();
+    }
+    let mut groupe = String::new();
+    for (i, c) in entier.chars().enumerate() {
+        if i > 0 && (entier.len() - i) % 3 == 0 {
+            groupe.push('\u{202f}');
+        }
+        groupe.push(c);
+    }
+    groupe + reste
 }
 
 fn erreur_en_cours(app: &Application) -> Option<String> {
@@ -166,6 +196,20 @@ pub(super) fn fenetre_especes(ctx: &Context, app: &mut Application) {
                                 .frame(Frame::NONE)
                                 .desired_width(f32::INFINITY);
                             let reponse = ui.add(champ).labelled_by(etiquette.id);
+                            if reponse.changed() {
+                                let groupee = regrouper(&app.saisie_recu);
+                                if groupee != app.saisie_recu {
+                                    // Le curseur reste à la fin : on tape toujours à la suite.
+                                    let fin = CCursor::new(groupee.chars().count());
+                                    app.saisie_recu = groupee;
+                                    if let Some(mut etat) =
+                                        TextEditState::load(ui.ctx(), reponse.id)
+                                    {
+                                        etat.cursor.set_char_range(Some(CCursorRange::one(fin)));
+                                        etat.store(ui.ctx(), reponse.id);
+                                    }
+                                }
+                            }
                             if focus {
                                 reponse.request_focus();
                             }
@@ -272,7 +316,7 @@ pub(super) fn fenetre_especes(ctx: &Context, app: &mut Application) {
         });
     });
     if let Some(montant) = choix {
-        app.saisie_recu = devise.formater_brut(montant);
+        app.saisie_recu = regrouper(&devise.formater_brut(montant));
     }
     if valider && valide {
         payer(app, Moyen::Especes);
@@ -549,6 +593,35 @@ mod tests {
 
     fn nbsp(texte: &str) -> String {
         texte.replace("EUR", "\u{a0}€")
+    }
+
+    #[test]
+    fn la_saisie_du_montant_recu_regroupe_les_milliers() {
+        use super::regrouper;
+        assert_eq!(regrouper("20000"), "20\u{202f}000");
+        assert_eq!(regrouper("1234,5"), "1\u{202f}234,5");
+        assert_eq!(regrouper("1234.50"), "1\u{202f}234.50");
+        assert_eq!(regrouper("1 234 567"), "1\u{202f}234\u{202f}567");
+        assert_eq!(regrouper("20\u{202f}0000"), "200\u{202f}000");
+        assert_eq!(regrouper("12"), "12");
+        assert_eq!(regrouper(""), "");
+        assert_eq!(regrouper(",5"), ",5");
+        // Ce qui n'est pas un nombre reste tel quel : « Montant illisible » le dira.
+        for illisible in ["abc", "1e5", "-5", "12,345,6", "1 2a"] {
+            assert_eq!(regrouper(illisible), illisible);
+        }
+    }
+
+    #[test]
+    fn taper_un_montant_le_regroupe_et_le_rendu_se_calcule() {
+        let mut h = harness_vente(a_payer("recu-groupe"), FENETRE);
+        cliquer(&mut h, BOUTON_ESPECES);
+        saisir(&mut h, CHAMP_RECU, "1000");
+        assert_eq!(h.state().saisie_recu, "1\u{202f}000");
+        h.get_by_label(MONNAIE_A_RENDRE);
+        h.get_by_label(&nbsp("995,10EUR"));
+        cliquer(&mut h, BOUTON_VALIDER);
+        assert_eq!(nombre_de_pieces(&h), 1);
     }
 
     #[test]

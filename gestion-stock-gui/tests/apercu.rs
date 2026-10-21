@@ -93,6 +93,25 @@ fn capturer(nom: &str, taille: Vec2, app: Application) {
     h.snapshot_options(nom, &SnapshotOptions::new().output_path(dossier));
 }
 
+/// Les produits de la maquette, avec leur prix en FCFA et leur stock.
+const PRODUITS_KORA: [(&str, &str, &str); 15] = [
+    ("Riz parfumé 5 kg", "4750", "61"),
+    ("Huile d'arachide 1 L", "1600", "40"),
+    ("Lait en poudre 400 g", "2350", "34"),
+    ("Lait en poudre 900 g", "4900", "12"),
+    ("Lait concentré sucré 397 g", "850", "3"),
+    ("Lait UHT 1 L", "1100", "48"),
+    ("Lait caillé 500 g", "900", "0"),
+    ("Sucre en morceaux 1 kg", "800", "75"),
+    ("Eau minérale 1,5 L", "400", "230"),
+    ("Baguette", "175", "140"),
+    ("Spaghetti 500 g", "650", "30"),
+    ("Concentré de tomate 400 g", "700", "30"),
+    ("Yaourt nature × 4", "1500", "22"),
+    ("Poulet entier", "3400", "9"),
+    ("Café moulu 250 g", "1900", "5"),
+];
+
 /// La boutique de la maquette : produits en FCFA, TVA 18 % incluse, à 14 h 32. Sert à comparer
 /// l'écran, élément par élément, aux captures de `maquette/`.
 fn kora_exemple(nom: &str) -> Application {
@@ -108,23 +127,7 @@ fn kora_exemple(nom: &str) -> Application {
         decalage_minutes: 0,
     });
     assert!(etat.definir_reglages(Profil::Europe, Devise::Xof, "18"));
-    for (produit, prix, stock) in [
-        ("Riz parfumé 5 kg", "4750", "61"),
-        ("Huile d'arachide 1 L", "1600", "40"),
-        ("Lait en poudre 400 g", "2350", "34"),
-        ("Lait en poudre 900 g", "4900", "12"),
-        ("Lait concentré sucré 397 g", "850", "3"),
-        ("Lait UHT 1 L", "1100", "48"),
-        ("Lait caillé 500 g", "900", "0"),
-        ("Sucre en morceaux 1 kg", "800", "75"),
-        ("Eau minérale 1,5 L", "400", "230"),
-        ("Baguette", "175", "140"),
-        ("Spaghetti 500 g", "650", "30"),
-        ("Concentré de tomate 400 g", "700", "30"),
-        ("Yaourt nature × 4", "1500", "22"),
-        ("Poulet entier", "3400", "9"),
-        ("Café moulu 250 g", "1900", "5"),
-    ] {
+    for (produit, prix, stock) in PRODUITS_KORA {
         assert!(etat.ajouter_avec_prix(produit, "0", prix, ""));
         if stock != "0" {
             assert!(etat.entree(produit, stock));
@@ -143,6 +146,119 @@ fn kora_exemple(nom: &str) -> Application {
         ("Concentré de tomate 400 g".to_string(), 2),
     ];
     app.ligne_choisie = Some("Concentré de tomate 400 g".to_string());
+    app
+}
+
+/// Les ventes du jour de la maquette (écran « Historique ») : dix tickets, un remboursé, le plus
+/// récent choisi. L'heure avance de sept minutes en sept minutes.
+fn kora_historique() -> Application {
+    use gestion_stock::monnaie::Devise;
+    use gestion_stock::reglages::Profil;
+    use std::{cell::Cell, rc::Rc};
+    let chemin = std::env::temp_dir().join(format!(
+        "gestion-stock-gui-kora-{}-historique.txt",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_file(&chemin);
+    let heure = Rc::new(Cell::new(1_699_968_120_i64)); // 13 h 22
+    let horloge = heure.clone();
+    let mut etat = Etat::ouvrir(chemin)
+        .unwrap()
+        .avec_horloge(move || Horodatage {
+            utc: horloge.get(),
+            decalage_minutes: 0,
+        });
+    assert!(etat.definir_reglages(Profil::Europe, Devise::Xof, "18"));
+    for (produit, prix, stock) in PRODUITS_KORA {
+        assert!(etat.ajouter_avec_prix(produit, "0", prix, ""));
+        if stock != "0" {
+            assert!(etat.entree(produit, "300"));
+        }
+    }
+    let ticket = |lignes: &[(&str, u32)]| -> Vec<(String, u32)> {
+        lignes.iter().map(|(n, q)| (n.to_string(), *q)).collect()
+    };
+    let ventes: [(Vec<(String, u32)>, Moyen); 10] = [
+        (
+            ticket(&[("Riz parfumé 5 kg", 1), ("Baguette", 2)]),
+            Moyen::Carte,
+        ),
+        (
+            ticket(&[
+                ("Poulet entier", 3),
+                ("Spaghetti 500 g", 3),
+                ("Baguette", 3),
+            ]),
+            Moyen::Especes,
+        ),
+        (
+            ticket(&[("Eau minérale 1,5 L", 5), ("Lait UHT 1 L", 1)]),
+            Moyen::Autre,
+        ),
+        (
+            ticket(&[
+                ("Riz parfumé 5 kg", 2),
+                ("Huile d'arachide 1 L", 1),
+                ("Café moulu 250 g", 1),
+            ]),
+            Moyen::Especes,
+        ),
+        (
+            ticket(&[
+                ("Lait en poudre 900 g", 1),
+                ("Poulet entier", 1),
+                ("Baguette", 4),
+            ]),
+            Moyen::Carte,
+        ),
+        (
+            ticket(&[
+                ("Poulet entier", 1),
+                ("Yaourt nature × 4", 1),
+                ("Baguette", 3),
+            ]),
+            Moyen::Especes,
+        ),
+        (
+            ticket(&[("Café moulu 250 g", 1), ("Eau minérale 1,5 L", 1)]),
+            Moyen::Especes,
+        ),
+        (
+            ticket(&[
+                ("Riz parfumé 5 kg", 1),
+                ("Eau minérale 1,5 L", 1),
+                ("Sucre en morceaux 1 kg", 1),
+            ]),
+            Moyen::Autre,
+        ),
+        (
+            ticket(&[("Riz parfumé 5 kg", 4), ("Poulet entier", 1)]),
+            Moyen::Especes,
+        ),
+        (
+            ticket(&[
+                ("Lait en poudre 400 g", 1),
+                ("Sucre en morceaux 1 kg", 2),
+                ("Baguette", 2),
+                ("Café moulu 250 g", 1),
+                ("Yaourt nature × 4", 1),
+                ("Poulet entier", 1),
+                ("Eau minérale 1,5 L", 1),
+            ]),
+            Moyen::Carte,
+        ),
+    ];
+    for (i, (panier, moyen)) in ventes.iter().enumerate() {
+        assert!(etat.encaisser(panier, *moyen, "100000"));
+        if i == 4 {
+            assert!(etat.annuler(5)); // le 5e ticket est remboursé
+        }
+        heure.set(heure.get() + 7 * 60);
+    }
+    etat.effacer_ticket();
+    etat.retour = None;
+    let mut app = Application::nouvelle(etat);
+    app.ecran = Ecran::Historique;
     app
 }
 
@@ -302,4 +418,10 @@ fn apercu_kora_recherche() {
     let mut app = kora_exemple("recherche");
     app.ouvrir_la_recherche("lait".into());
     capturer("kora_recherche", ECRAN, app);
+}
+
+#[test]
+#[ignore = "outil de design : lancer à la main"]
+fn apercu_kora_historique() {
+    capturer("kora_historique", ECRAN, kora_historique());
 }

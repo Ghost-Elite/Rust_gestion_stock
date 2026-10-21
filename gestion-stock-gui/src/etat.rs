@@ -205,8 +205,18 @@ fn lire_taux_facultatif(texte: &str) -> Result<Option<u32>, ErreurStock> {
     }
 }
 
+/// Un montant tapé sans les espaces qui séparent les milliers (« 1 000 », espace fine ou non).
+fn sans_milliers(texte: &str) -> String {
+    texte
+        .chars()
+        .filter(|c| !matches!(c, ' ' | '\u{a0}' | '\u{202f}'))
+        .collect()
+}
+
 /// Le montant donné par le client en espèces : obligatoire.
 fn lire_recu(devise: Devise, texte: &str) -> Result<Montant, ErreurStock> {
+    let texte = sans_milliers(texte);
+    let texte = texte.as_str();
     if texte.trim().is_empty() {
         return Err(ErreurStock::Utilisation(
             "Montant reçu manquant. Saisissez la somme donnée par le client, par exemple 20."
@@ -661,7 +671,7 @@ impl Etat {
         if total <= Montant::ZERO || recu.trim().is_empty() {
             return Reglement::Attente;
         }
-        match self.stock.reglages().devise.lire(recu) {
+        match self.stock.reglages().devise.lire(&sans_milliers(recu)) {
             Ok(recu) if recu < Montant::ZERO => Reglement::Illisible,
             Ok(recu) if recu < total => Reglement::Manque(Montant(total.0 - recu.0)),
             Ok(recu) => Reglement::Rendu(Montant(recu.0 - total.0)),
@@ -1458,6 +1468,15 @@ mod tests {
         assert_eq!(
             e.reglement_especes(total, "5"),
             Reglement::Rendu(Montant(140))
+        );
+        // Les milliers peuvent être séparés (la saisie les groupe : « 1 000 »).
+        assert_eq!(
+            e.reglement_especes(total, "1\u{202f}000"),
+            Reglement::Rendu(Montant(99_640))
+        );
+        assert_eq!(
+            e.reglement_especes(total, "1 000"),
+            Reglement::Rendu(Montant(99_640))
         );
         // Un panier vide n'a rien à encaisser.
         assert_eq!(e.reglement_especes(Montant(0), "5"), Reglement::Attente);

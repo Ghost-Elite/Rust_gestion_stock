@@ -4,7 +4,7 @@
 
 use super::composants::{
     LigneBouton, Style, bandeau_alerte, bouton_a_lignes, bouton_large, bouton_symbole, discret,
-    modale, repere, zone,
+    libelle_et_valeur, modale, repere, zone, zone_fixe,
 };
 use super::{Application, LARGEUR_CAISSE_DEUX_COLONNES, Modale};
 use crate::etat::{DetailTicket, LigneHistorique, Retour, StatutPiece};
@@ -17,10 +17,15 @@ use crate::police::{Graisse, police_disponible};
 use crate::textes::*;
 use eframe::egui::{
     Align, CentralPanel, Context, CornerRadius, FontId, Frame, Id, Label, Layout, Margin, Panel,
-    RichText, ScrollArea, Sense, Stroke, TextEdit, Ui, UiBuilder, Vec2, WidgetInfo, WidgetType,
+    Pos2, RichText, ScrollArea, Sense, Shape, Stroke, TextEdit, Ui, UiBuilder, Vec2, WidgetInfo,
+    WidgetType,
 };
 
 const HAUTEUR_LIGNE: f32 = 56.0;
+/// Une ligne du détail : 40 de repère + 2 × 8 de marge + 1 de filet pointillé.
+const HAUTEUR_LIGNE_DETAIL: f32 = 57.0;
+/// Le pied du ticket choisi : filet de 1, total (16 + 28 × 1,3 + 16), boutons de 56 et 20 de marge.
+const HAUTEUR_PIED_DETAIL: f32 = 1.0 + 16.0 + 28.0 * 1.3 + 16.0 + 56.0 + 20.0;
 const LARGEUR_PANNEAU: f32 = 420.0;
 const HAUTEUR_BLOC_ETROIT: f32 = 420.0;
 
@@ -229,58 +234,70 @@ fn en_tete_de_liste(ui: &mut Ui, app: &mut Application, vue: &Vue) -> Option<Act
         .inner_margin(Margin::symmetric(20, 16))
         .show(ui, |ui| {
             ui.spacing_mut().item_spacing.x = 8.0;
-            ui.horizontal(|ui| {
-                ui.heading(RichText::new(titre).size(22.0));
-                if !cherche {
-                    let avant = jour_voisin(&vue.jours, &vue.jour, true);
-                    let apres = jour_voisin(&vue.jours, &vue.jour, false);
-                    if bouton_symbole(ui, "\u{2039}", JOUR_PRECEDENT, avant.is_some(), 44.0)
-                        .clicked()
-                        && let Some(jour) = avant
-                    {
-                        action = Some(Action::Aller(jour));
+            // 48 de haut exactement, comme le champ de la maquette (16 + 48 + 16 = 80).
+            let largeur = ui.available_width();
+            zone_fixe(
+                ui,
+                Vec2::new(largeur, 48.0),
+                Layout::left_to_right(Align::Center),
+                |ui| {
+                    ui.heading(RichText::new(titre).size(22.0));
+                    if !cherche {
+                        let avant = jour_voisin(&vue.jours, &vue.jour, true);
+                        let apres = jour_voisin(&vue.jours, &vue.jour, false);
+                        if bouton_symbole(ui, "\u{2039}", JOUR_PRECEDENT, avant.is_some(), 44.0)
+                            .clicked()
+                            && let Some(jour) = avant
+                        {
+                            action = Some(Action::Aller(jour));
+                        }
+                        if bouton_symbole(ui, "\u{203a}", JOUR_SUIVANT, apres.is_some(), 44.0)
+                            .clicked()
+                            && let Some(jour) = apres
+                        {
+                            action = Some(Action::Aller(jour));
+                        }
                     }
-                    if bouton_symbole(ui, "\u{203a}", JOUR_SUIVANT, apres.is_some(), 44.0).clicked()
-                        && let Some(jour) = apres
-                    {
-                        action = Some(Action::Aller(jour));
-                    }
-                }
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    Frame::new()
-                        .stroke(Stroke::new(1.0, couleur(BORDURE)))
-                        .corner_radius(CornerRadius::same(10))
-                        .inner_margin(Margin::symmetric(14, 0))
-                        .show(ui, |ui| {
-                            zone(
-                                ui,
-                                Vec2::new(212.0, 46.0),
-                                Layout::left_to_right(Align::Center),
-                                |ui| {
-                                    let champ = TextEdit::singleline(&mut app.historique.filtre)
-                                        .hint_text(
-                                            RichText::new(CHAMP_TICKET)
-                                                .size(16.0)
-                                                .color(couleur(TEXTE_DISCRET)),
-                                        )
-                                        .font(FontId::proportional(16.0))
-                                        .frame(Frame::NONE)
-                                        .desired_width(f32::INFINITY);
-                                    let reponse = ui.add(champ);
-                                    ui.ctx().accesskit_node_builder(reponse.id, |noeud| {
-                                        noeud.set_label(CHAMP_TICKET);
-                                    });
-                                },
-                            );
-                        });
-                });
-            });
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        Frame::new()
+                            .stroke(Stroke::new(1.0, couleur(BORDURE)))
+                            .corner_radius(CornerRadius::same(10))
+                            .inner_margin(Margin::symmetric(14, 0))
+                            .show(ui, |ui| {
+                                zone(
+                                    ui,
+                                    Vec2::new(212.0, 46.0),
+                                    Layout::left_to_right(Align::Center),
+                                    |ui| {
+                                        let champ =
+                                            TextEdit::singleline(&mut app.historique.filtre)
+                                                .hint_text(
+                                                    RichText::new(CHAMP_TICKET)
+                                                        .size(16.0)
+                                                        .color(couleur(TEXTE_DISCRET)),
+                                                )
+                                                .font(FontId::proportional(16.0))
+                                                .frame(Frame::NONE)
+                                                .desired_width(f32::INFINITY);
+                                        let reponse = ui.add(champ);
+                                        ui.ctx().accesskit_node_builder(reponse.id, |noeud| {
+                                            noeud.set_label(CHAMP_TICKET);
+                                        });
+                                    },
+                                );
+                            });
+                    });
+                },
+            );
         })
         .response
         .rect;
+    // Le filet sous l'en-tête occupe sa propre ligne de 1 (le « border-bottom » de la maquette) :
+    // peint par-dessus la dernière ligne de l'en-tête, la première ligne de la liste le recouvrait.
+    let (filet, _) = ui.allocate_exact_size(Vec2::new(zone_titre.width(), 1.0), Sense::hover());
     ui.painter().hline(
-        zone_titre.x_range(),
-        zone_titre.bottom(),
+        filet.x_range(),
+        filet.top() + 0.5,
         Stroke::new(1.0, couleur(FILET)),
     );
     action
@@ -446,7 +463,7 @@ fn panneau_detail(ui: &mut Ui, vue: &Vue, hauteur: Option<f32>) -> Option<u64> {
                 zone_titre.bottom(),
                 Stroke::new(1.0, couleur(FILET)),
             );
-            let reste = (ui.available_height() - 168.0).max(80.0);
+            let reste = (ui.available_height() - HAUTEUR_PIED_DETAIL).max(80.0);
             ScrollArea::vertical()
                 .auto_shrink([false, false])
                 .max_height(reste)
@@ -471,12 +488,18 @@ fn heure_du_ticket(quand: &str) -> String {
 }
 
 fn ligne_du_detail(ui: &mut Ui, quantite: u32, nom: &str, total: &str) {
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 56.0), Sense::hover());
-    ui.painter().hline(
-        rect.x_range(),
-        rect.bottom() - 0.5,
-        Stroke::new(1.0, couleur(FILET_LIGNE)),
+    let (rect, _) = ui.allocate_exact_size(
+        Vec2::new(ui.available_width(), HAUTEUR_LIGNE_DETAIL),
+        Sense::hover(),
     );
+    // Le filet de la maquette est pointillé (« 1px dashed »).
+    let y = rect.bottom() - 0.5;
+    ui.painter().add(Shape::dashed_line(
+        &[Pos2::new(rect.left(), y), Pos2::new(rect.right(), y)],
+        Stroke::new(1.0, couleur(FILET)),
+        3.0,
+        3.0,
+    ));
     let mut enfant = ui.new_child(
         UiBuilder::new()
             .max_rect(rect.shrink2(Vec2::new(0.0, 8.0)))
@@ -515,32 +538,29 @@ fn pied_du_detail(
     numero: u64,
     demande: &mut Option<u64>,
 ) {
-    let zone_total = Frame::new()
+    // Le filet de 1 de haut qui sépare la liste du total (le « border-top » de la maquette).
+    let (filet, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 1.0), Sense::hover());
+    ui.painter().hline(
+        filet.x_range(),
+        filet.top() + 0.5,
+        Stroke::new(1.0, couleur(FILET)),
+    );
+    Frame::new()
         .inner_margin(Margin::symmetric(20, 16))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.horizontal(|ui| {
-                ui.label(
-                    RichText::new(LIBELLE_TOTAL_TICKET)
-                        .font(police_disponible(ui.ctx(), Graisse::SemiGrasse, 17.0))
-                        .color(couleur(TEXTE_SECONDAIRE)),
-                );
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    ui.label(
-                        RichText::new(&detail.total)
-                            .font(police_disponible(ui.ctx(), Graisse::Grasse, 28.0))
-                            .color(couleur(TEXTE)),
-                    );
-                });
-            });
-        })
-        .response
-        .rect;
-    ui.painter().hline(
-        zone_total.x_range(),
-        zone_total.top(),
-        Stroke::new(1.0, couleur(FILET)),
-    );
+            libelle_et_valeur(
+                ui,
+                RichText::new(LIBELLE_TOTAL_TICKET)
+                    .font(police_disponible(ui.ctx(), Graisse::SemiGrasse, 17.0))
+                    .color(couleur(TEXTE_SECONDAIRE)),
+                17.0,
+                RichText::new(&detail.total)
+                    .font(police_disponible(ui.ctx(), Graisse::Grasse, 28.0))
+                    .color(couleur(TEXTE)),
+                28.0,
+            );
+        });
     let possible = detail.statut == StatutPiece::Payee && vue.integrite.is_ok();
     Frame::new()
         .inner_margin(Margin {
@@ -647,8 +667,49 @@ mod tests {
     use super::{filtrer, jour_voisin};
     use crate::etat::{LigneHistorique, StatutPiece};
     use eframe::egui::accesskit::Role;
-    use egui_kittest::kittest::Queryable;
+    use egui_kittest::kittest::{NodeT, Queryable};
     use gestion_stock::vente::Moyen;
+
+    /// `maquette/5-historique.html` à 1366 × 768 : le pied du ticket choisi est collé en bas de la
+    /// carte (20 de marge sous les boutons de 56), et les lignes du détail ont un pas de 57.
+    #[test]
+    fn le_pied_du_ticket_choisi_est_en_bas_de_la_carte_comme_la_maquette() {
+        let mut app = app_avec_ventes("historique-cotes");
+        app.historique.choisi = Some(1);
+        let h = harness_fenetre(app, FENETRE);
+        let rembourser = h
+            .get_by_role_and_label(Role::Button, &rembourser_le_ticket(&numero_de_ticket(1)))
+            .rect();
+        assert_eq!(rembourser.height(), 56.0);
+        assert_eq!(rembourser.bottom(), 731.0, "751 de carte moins 20 de marge");
+        // Le total en 28 points : 16 de marge, une ligne de 36,4, 16 de marge, puis le bouton.
+        let total = h
+            .get_all_by_label_contains("€")
+            .map(|n| n.rect())
+            .find(|r| r.height() > 30.0 && r.left() > 930.0)
+            .expect("total du ticket");
+        assert!(
+            (rembourser.top() - total.bottom() - 16.0).abs() < 0.5,
+            "{total:?} {rembourser:?}"
+        );
+    }
+
+    /// La carte des ventes : un en-tête de 80 puis son filet de 1, donc la première ligne (de 56)
+    /// commence à 154, sous la carte qui commence à 72 (1 de bord).
+    #[test]
+    fn la_premiere_ligne_de_la_liste_commence_a_154_comme_la_maquette() {
+        let h = harness_fenetre(app_avec_ventes("historique-liste"), FENETRE);
+        let premiere = h
+            .get_all_by_role(Role::Button)
+            .find(|n| {
+                n.accesskit_node()
+                    .label()
+                    .is_some_and(|l| l.starts_with(&format!("Ticket {},", numero_de_ticket(2))))
+            })
+            .expect("la ligne du dernier ticket")
+            .rect();
+        assert_eq!((premiere.top(), premiere.height()), (154.0, 56.0));
+    }
 
     fn ligne(numero: u64, jour: &str) -> LigneHistorique {
         LigneHistorique {
