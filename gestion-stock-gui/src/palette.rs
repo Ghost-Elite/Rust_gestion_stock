@@ -151,7 +151,10 @@ pub fn appliquer(ctx: &Context) {
         style.spacing.button_padding = Vec2::new(16.0, 9.0);
         style.spacing.interact_size.y = 36.0;
         style.text_styles = [
-            (TextStyle::Heading, crate::police::semi_gras(24.0)),
+            (
+                TextStyle::Heading,
+                crate::police::police(crate::police::Graisse::SemiGrasse, 22.0),
+            ),
             (TextStyle::Body, FontId::new(15.5, FontFamily::Proportional)),
             (
                 TextStyle::Button,
@@ -307,7 +310,7 @@ mod tests {
         let taille = |t: &TextStyle| style.text_styles[t].size;
         assert_eq!(
             style.text_styles[&TextStyle::Heading].family,
-            crate::police::famille_semi_grasse(),
+            crate::police::famille(crate::police::Graisse::SemiGrasse),
             "les titres sont en semi-gras"
         );
         assert!(taille(&TextStyle::Heading) >= 22.0);

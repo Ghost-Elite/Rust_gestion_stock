@@ -13,7 +13,7 @@ use crate::palette::{
     ACCENT, ACCENT_DOUX, ACCENT_TEXTE, ALERTE_FOND, ALERTE_TEXTE, FILET, FOCUS, FOND, SORTIE_TEXTE,
     SUCCES_FOND, SUCCES_TEXTE, SURFACE, TEXTE, TEXTE_DISCRET, couleur,
 };
-use crate::police::famille_disponible;
+use crate::police::{Graisse, famille_disponible};
 use crate::textes::*;
 use eframe::egui::{
     self, Align, Button, CentralPanel, CornerRadius, CursorIcon, FontId, Frame, Id, Layout, Margin,
@@ -373,7 +373,7 @@ fn chiffre(ui: &mut Ui, libelle: &str, valeur: String, alerte: bool) {
         ui.label(
             RichText::new(valeur)
                 .size(30.0)
-                .family(famille_disponible(ui.ctx()))
+                .family(famille_disponible(ui.ctx(), Graisse::SemiGrasse))
                 .color(couleur(couleur_valeur)),
         );
     });
@@ -1090,7 +1090,7 @@ fn tuiles(ui: &mut Ui, app: &mut Application) {
 /// son contour, survol, état grisé.
 fn bouton_tuile(ui: &mut Ui, actif: bool, nom: &str, prix: &str) -> Response {
     let marge = Vec2::new(12.0, 9.0);
-    let famille = famille_disponible(ui.ctx());
+    let famille = famille_disponible(ui.ctx(), Graisse::SemiGrasse);
     let couleur_texte = couleur(if actif { TEXTE } else { TEXTE_DISCRET });
     let galerie_nom = ui.painter().layout(
         nom.to_string(),
@@ -2183,7 +2183,9 @@ mod tests {
 
     #[test]
     fn l_alerte_de_stock_reste_visible_a_200_pour_cent_sur_l_ecran_vente() {
-        let taille = Vec2::new(960.0, 1400.0);
+        // Assez haute pour que seul un débordement HORIZONTAL fasse échouer le test (Plex a des
+        // lignes un peu plus hautes qu'Inter : à 1400 la dernière rangée de tuiles sortait).
+        let taille = Vec2::new(960.0, 2000.0);
         let mut app = app_vendeuse_avec_blocages("zoom-vente");
         let ecran = Rect::from_min_size(Pos2::ZERO, taille / 2.0);
         let textes = textes_peints(&mut app, taille, 2.0);

@@ -5,7 +5,7 @@ use crate::palette::{
     ACCENT, ACCENT_TEXTE, ALERTE_FOND, ALERTE_TEXTE, DANGER, FILET, SURFACE, TEXTE_DISCRET,
     couleur, ombre,
 };
-use crate::police::famille_disponible;
+use crate::police::{Graisse, famille_disponible};
 use eframe::egui::{
     self, Button, CornerRadius, FontId, Frame, Margin, Response, RichText, Stroke, TextEdit, Ui,
     Vec2, WidgetInfo, WidgetType,
@@ -180,7 +180,10 @@ pub(crate) fn bouton_choix(ui: &mut Ui, texte: &str, choisi: bool, largeur: f32)
 
 /// Un texte en semi-gras : la graisse, plus que la taille, fait ressortir ce qui compte.
 pub(crate) fn gras(ui: &Ui, texte: &str, taille: f32) -> RichText {
-    RichText::new(texte).font(FontId::new(taille, famille_disponible(ui.ctx())))
+    RichText::new(texte).font(FontId::new(
+        taille,
+        famille_disponible(ui.ctx(), Graisse::SemiGrasse),
+    ))
 }
 
 /// Un petit bouton carré (« − », « + »). Son texte n'est qu'un symbole : on lui donne un nom
