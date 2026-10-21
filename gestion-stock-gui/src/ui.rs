@@ -10,15 +10,15 @@
 
 use crate::etat::{Etat, LignePiece, LigneProduit, Reglement, Resume, Retour, chemin_complet};
 use crate::palette::{
-    ACCENT, ACCENT_DOUX, ACCENT_TEXTE, ALERTE_FOND, ALERTE_TEXTE, DANGER, FILET, FOCUS, FOND,
-    SORTIE_TEXTE, SUCCES_FOND, SUCCES_TEXTE, SURFACE, TEXTE, TEXTE_DISCRET, couleur, ombre,
+    ACCENT, ACCENT_DOUX, ACCENT_TEXTE, ALERTE_FOND, ALERTE_TEXTE, FILET, FOCUS, FOND, SORTIE_TEXTE,
+    SUCCES_FOND, SUCCES_TEXTE, SURFACE, TEXTE, TEXTE_DISCRET, couleur,
 };
 use crate::police::famille_disponible;
 use crate::textes::*;
 use eframe::egui::{
     self, Align, Button, CentralPanel, CornerRadius, CursorIcon, FontId, Frame, Id, Layout, Margin,
-    Panel, Response, RichText, ScrollArea, Sense, Stroke, StrokeKind, TextEdit, Ui, Vec2,
-    WidgetInfo, WidgetType,
+    Panel, Response, RichText, ScrollArea, Sense, Stroke, StrokeKind, Ui, Vec2, WidgetInfo,
+    WidgetType,
 };
 use gestion_stock::erreur::ErreurStock;
 use gestion_stock::monnaie::{Devise, Montant};
@@ -26,6 +26,12 @@ use gestion_stock::reglages::Profil;
 use gestion_stock::vente::Moyen;
 use gestion_stock::vente::{Devis, GenrePiece, GroupeTaux};
 use std::path::Path;
+
+mod composants;
+#[cfg(test)]
+mod essais;
+
+use composants::*;
 
 /// La taille de la fenêtre au lancement et sa taille minimale, en points. Les tests les utilisent
 /// aussi : ils vérifient que l'essentiel est à l'écran à la taille que voit vraiment la personne.
@@ -235,155 +241,6 @@ fn abandonner_la_selection_perimee(app: &mut Application) {
     }
 }
 
-// ---- Petits éléments de style -----------------------------------------------------------------
-
-/// Une carte blanche aux coins arrondis, avec une ombre légère.
-fn carte<R>(ui: &mut Ui, contenu: impl FnOnce(&mut Ui) -> R) -> R {
-    carte_marge(ui, 18, contenu).inner
-}
-
-/// La même carte avec une marge au choix : le paiement, qui doit tenir à l'écran, en prend moins.
-fn carte_marge<R>(
-    ui: &mut Ui,
-    marge: i8,
-    contenu: impl FnOnce(&mut Ui) -> R,
-) -> egui::InnerResponse<R> {
-    Frame::new()
-        .fill(couleur(SURFACE))
-        .stroke(Stroke::new(1.0, couleur(FILET)))
-        .corner_radius(CornerRadius::same(14))
-        .inner_margin(Margin::same(marge))
-        .shadow(ombre())
-        .show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            contenu(ui)
-        })
-}
-
-/// Le titre d'une carte : un vrai titre pour les lecteurs d'écran, plus petit que celui de la page.
-fn titre_de_carte(ui: &mut Ui, texte: &str) {
-    ui.heading(RichText::new(texte).size(18.0));
-}
-
-/// Un texte secondaire, plus petit et plus gris (mais toujours >= 4,5:1).
-fn discret(ui: &mut Ui, texte: &str) {
-    ui.label(
-        RichText::new(texte)
-            .size(13.5)
-            .color(couleur(TEXTE_DISCRET)),
-    );
-}
-
-/// Une puce arrondie : l'état est toujours écrit dans la puce, la couleur n'est qu'un renfort.
-fn puce(ui: &mut Ui, texte: &str, fond: [u8; 3], texte_couleur: [u8; 3]) {
-    Frame::new()
-        .fill(couleur(fond))
-        .corner_radius(CornerRadius::same(12))
-        .inner_margin(Margin::symmetric(10, 3))
-        .show(ui, |ui| {
-            ui.label(
-                RichText::new(texte)
-                    .size(13.5)
-                    .color(couleur(texte_couleur)),
-            );
-        });
-}
-
-/// Un texte important sur fond rouge clair. La couleur n'est jamais seule : le texte dit tout.
-fn bandeau_alerte(ui: &mut Ui, texte: &str) {
-    Frame::new()
-        .fill(couleur(ALERTE_FOND))
-        .corner_radius(CornerRadius::same(8))
-        .inner_margin(Margin::symmetric(10, 6))
-        .show(ui, |ui| {
-            ui.label(RichText::new(texte).color(couleur(ALERTE_TEXTE)));
-        });
-}
-
-/// Un champ de saisie relié à son libellé, pour les lecteurs d'écran.
-fn champ(ui: &mut Ui, libelle: &str, valeur: &mut String) -> Response {
-    let etiquette = ui.label(
-        RichText::new(libelle)
-            .size(13.5)
-            .color(couleur(TEXTE_DISCRET)),
-    );
-    ui.add(
-        TextEdit::singleline(valeur)
-            .desired_width(f32::INFINITY)
-            .margin(Margin::symmetric(10, 8)),
-    )
-    .labelled_by(etiquette.id)
-}
-
-/// Un champ de saisie sur la même ligne que son libellé, pour gagner de la hauteur. On peut
-/// y ajouter quelque chose à droite : `reserve` est la largeur à lui laisser.
-fn champ_en_ligne(
-    ui: &mut Ui,
-    libelle: &str,
-    valeur: &mut String,
-    reserve: f32,
-    a_droite: impl FnOnce(&mut Ui),
-) -> Response {
-    ui.horizontal(|ui| {
-        let etiquette = ui.label(
-            RichText::new(libelle)
-                .size(13.5)
-                .color(couleur(TEXTE_DISCRET)),
-        );
-        let largeur = (ui.available_width() - reserve - ui.spacing().item_spacing.x).max(60.0);
-        let champ = ui
-            .add(
-                TextEdit::singleline(valeur)
-                    .desired_width(largeur)
-                    .margin(Margin::symmetric(10, 8)),
-            )
-            .labelled_by(etiquette.id);
-        a_droite(ui);
-        champ
-    })
-    .inner
-}
-
-#[derive(Clone, Copy)]
-enum Style {
-    /// Le bouton à mettre en avant : fond d'accent, texte blanc.
-    Principal,
-    /// Un bouton ordinaire : fond blanc, bordure, texte sombre.
-    Secondaire,
-    /// Une action qui supprime : texte et bordure rouges sur fond blanc.
-    Danger,
-    /// La confirmation d'une suppression : fond rouge, texte blanc.
-    Confirmation,
-}
-
-/// Un bouton qui ne sert que si `actif` : sans cela, un double-clic enregistrerait l'action
-/// une fois, puis afficherait « Erreur : quantité manquante » par-dessus le succès, et la
-/// personne croirait que ça a échoué et recommencerait.
-fn bouton(ui: &mut Ui, texte: &str, style: Style, actif: bool) -> Response {
-    let bouton = match style {
-        Style::Principal => Button::new(gras(ui, texte, 15.5).color(couleur(ACCENT_TEXTE)))
-            .fill(couleur(ACCENT))
-            .stroke(Stroke::NONE),
-        Style::Secondaire => Button::new(texte),
-        Style::Danger => Button::new(RichText::new(texte).color(couleur(ALERTE_TEXTE)))
-            .fill(couleur(SURFACE))
-            .stroke(Stroke::new(1.0, couleur(ALERTE_TEXTE))),
-        Style::Confirmation => Button::new(gras(ui, texte, 15.5).color(couleur(ACCENT_TEXTE)))
-            .fill(couleur(DANGER))
-            .stroke(Stroke::NONE),
-    };
-    ui.add_enabled(
-        actif,
-        bouton
-            .min_size(Vec2::new(0.0, 38.0))
-            .corner_radius(CornerRadius::same(10)),
-    )
-}
-
-fn rempli(texte: &str) -> bool {
-    !texte.trim().is_empty()
-}
-
 // ---- Les zones de la fenêtre ------------------------------------------------------------------
 
 /// La largeur d'un onglet : la même pour tous, pour les aligner à droite sans surprise.
@@ -428,29 +285,6 @@ fn onglets(ui: &mut Ui, app: &mut Application) {
             app.onglet = onglet;
         }
     }
-}
-
-/// Un bouton « à bascule » : celui qui est choisi est plein et en accent, les autres sont
-/// des boutons ordinaires.
-fn bouton_choix(ui: &mut Ui, texte: &str, choisi: bool, largeur: f32) -> Response {
-    let bouton = if choisi {
-        Button::new(gras(ui, texte, 15.5).color(couleur(ACCENT_TEXTE)))
-            .fill(couleur(ACCENT))
-            .stroke(Stroke::NONE)
-    } else {
-        Button::new(texte)
-    };
-    ui.add(
-        bouton
-            .selected(choisi)
-            .min_size(Vec2::new(largeur, 38.0))
-            .corner_radius(CornerRadius::same(10)),
-    )
-}
-
-/// Un texte en semi-gras : la graisse, plus que la taille, fait ressortir ce qui compte.
-fn gras(ui: &Ui, texte: &str, taille: f32) -> RichText {
-    RichText::new(texte).font(FontId::new(taille, famille_disponible(ui.ctx())))
 }
 
 /// Un petit logo décoratif : un carré d'accent avec trois barres de stock. Il n'a pas de nom
@@ -1408,19 +1242,6 @@ fn lignes_du_panier(ui: &mut Ui, app: &mut Application, devis: &DevisPanier) {
     }
 }
 
-/// Un petit bouton carré (« − », « + »). Son texte n'est qu'un symbole : on lui donne un nom
-/// complet pour les lecteurs d'écran (« Retirer une unité de Pain »).
-fn bouton_symbole(ui: &mut Ui, symbole: &str, nom_accessible: &str, actif: bool) -> Response {
-    let reponse = ui.add_enabled(
-        actif,
-        Button::new(RichText::new(symbole).size(18.0))
-            .min_size(Vec2::splat(38.0))
-            .corner_radius(CornerRadius::same(10)),
-    );
-    reponse.widget_info(|| WidgetInfo::labeled(WidgetType::Button, actif, nom_accessible));
-    reponse
-}
-
 fn ligne_du_panier(
     ui: &mut Ui,
     nom: &str,
@@ -1649,28 +1470,19 @@ fn ecran_erreur_ouverture(ui: &mut Ui, app: &Application) {
 
 #[cfg(test)]
 mod tests {
+    use super::essais::*;
     use super::*;
     use crate::etat::Etat;
-    use crate::palette::{self, Rgb, rapport_contraste};
+    use crate::palette::{self, rapport_contraste};
     use eframe::egui::accesskit::Role;
-    use eframe::egui::{Color32, Context, Pos2, RawInput, Rect, Shape, Vec2};
+    use eframe::egui::{Pos2, Rect, Vec2};
     use egui_kittest::{
         Harness,
         kittest::{NodeT, Queryable},
     };
-    use gestion_stock::horodatage::Horodatage;
     use gestion_stock::monnaie::Devise;
     use gestion_stock::reglages::Profil;
-    use std::path::{Path, PathBuf};
-
-    fn chemin_temp(nom: &str) -> PathBuf {
-        let chemin = std::env::temp_dir().join(format!(
-            "gestion-stock-gui-ui-{}-{nom}.txt",
-            std::process::id()
-        ));
-        let _ = std::fs::remove_file(&chemin);
-        chemin
-    }
+    use std::path::Path;
 
     /// « Riz 5kg » (seuil 5, stock 3, en alerte) et « Sucre » (seuil 0, stock 10, correct).
     fn app_avec_produits(nom: &str) -> Application {
@@ -1682,24 +1494,6 @@ mod tests {
         let mut app = Application::nouvelle(etat);
         app.onglet = Onglet::Stock; // l'écran testé ici est celui du stock
         app
-    }
-
-    /// Une grande fenêtre : avec les cartes et l'espace du design, une fenêtre de 800 x 600 ne
-    /// montrerait pas tous les boutons, et ce qui est hors de l'écran n'existe pas pour le test.
-    fn harness(app: Application) -> Harness<'static, Application> {
-        let mut h = Harness::builder()
-            .with_size(Vec2::new(1100.0, 900.0))
-            .build_ui_state(|ui, app: &mut Application| dessiner(ui, app), app);
-        h.run();
-        h
-    }
-
-    /// Tape dans un champ comme le ferait une personne : d'abord le focus, puis le texte.
-    fn saisir(h: &mut Harness<'static, Application>, libelle: &str, texte: &str) {
-        h.get_by_label(libelle).focus();
-        h.run();
-        h.get_by_label(libelle).type_text(texte);
-        h.run();
     }
 
     #[test]
@@ -1844,86 +1638,6 @@ mod tests {
             "{:?}",
             etat.retour
         );
-    }
-
-    // ---- Ce qu'egui peint VRAIMENT, avec la vraie palette ----------------------------------
-
-    /// Un texte tel qu'egui le peint, avec la couleur du fond qui est derrière lui.
-    struct TextePeint {
-        texte: String,
-        couleur: Rgb,
-        fond: Rgb,
-        rect: Rect,
-    }
-
-    struct Releve {
-        fonds: Vec<(Rect, Color32)>,
-        fond_par_defaut: Color32,
-        textes: Vec<TextePeint>,
-    }
-
-    fn rgb(c: Color32) -> Rgb {
-        [c.r(), c.g(), c.b()]
-    }
-
-    /// Parcourt les formes dans l'ordre où egui les peint : un fond opaque peint avant un
-    /// texte, et qui le contient, est le fond de ce texte.
-    fn parcourir(forme: &Shape, releve: &mut Releve) {
-        match forme {
-            Shape::Vec(formes) => formes.iter().for_each(|f| parcourir(f, releve)),
-            Shape::Rect(r) if r.fill.a() == 255 => releve.fonds.push((r.rect, r.fill)),
-            Shape::Text(t) => {
-                let mut couleur = t
-                    .override_text_color
-                    .or(t.galley.job.sections.first().map(|s| s.format.color))
-                    .unwrap_or(t.fallback_color);
-                if couleur == Color32::PLACEHOLDER {
-                    couleur = t.fallback_color;
-                }
-                let rect = t.galley.rect.translate(t.pos.to_vec2());
-                let fond = releve
-                    .fonds
-                    .iter()
-                    .rev()
-                    .find(|(r, _)| r.contains(rect.center()))
-                    .map_or(releve.fond_par_defaut, |(_, c)| *c);
-                if !t.galley.job.text.trim().is_empty() {
-                    releve.textes.push(TextePeint {
-                        texte: t.galley.job.text.clone(),
-                        couleur: rgb(couleur),
-                        fond: rgb(fond),
-                        rect,
-                    });
-                }
-            }
-            _ => {}
-        }
-    }
-
-    /// Dessine l'application avec la VRAIE palette (`palette::appliquer`) puis relève chaque
-    /// texte peint. `taille` : la fenêtre ; `zoom` : le texte agrandi (Cmd/Ctrl +), qui
-    /// réduit d'autant la place disponible, en points.
-    fn textes_peints(app: &mut Application, taille: Vec2, zoom: f32) -> Vec<TextePeint> {
-        let ctx = Context::default();
-        palette::appliquer(&ctx);
-        let entree = || RawInput {
-            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, taille / zoom)),
-            ..Default::default()
-        };
-        // Comme dans une vraie fenêtre, la mise en page se stabilise en quelques images.
-        for _ in 0..4 {
-            let _ = ctx.run_ui(entree(), |ui| dessiner(ui, app));
-        }
-        let sortie = ctx.run_ui(entree(), |ui| dessiner(ui, app));
-        let mut releve = Releve {
-            fonds: Vec::new(),
-            fond_par_defaut: ctx.global_style().visuals.panel_fill,
-            textes: Vec::new(),
-        };
-        for forme in &sortie.shapes {
-            parcourir(&forme.shape, &mut releve);
-        }
-        releve.textes
     }
 
     /// Toutes les saisies remplies : aucun bouton n'est grisé (un contrôle inactif est
@@ -2082,72 +1796,8 @@ mod tests {
 
     // ---- L'écran de vente ----------------------------------------------------------------------
 
-    const FIXE: Horodatage = Horodatage {
-        utc: 1_700_000_000,
-        decalage_minutes: 60,
-    };
-
-    /// Pain : 10 en stock à 1,20 € (TVA 5,5 %) ; Savon : 10 à 2,50 € et Lait : 10 à 0,90 € (TVA par
-    /// défaut, 20 %). L'horloge est fixe : 14/11/2023 à 23 h 13 heure locale.
-    fn etat_vendeur(nom: &str) -> Etat {
-        let mut e = Etat::ouvrir(chemin_temp(nom))
-            .unwrap()
-            .avec_horloge(|| FIXE);
-        assert!(e.ajouter_avec_prix("Pain", "0", "1,20", "5,5"));
-        assert!(e.entree("Pain", "10"));
-        assert!(e.ajouter_avec_prix("Savon", "0", "2,50", ""));
-        assert!(e.entree("Savon", "10"));
-        assert!(e.ajouter_avec_prix("Lait", "0", "0,90", ""));
-        assert!(e.entree("Lait", "10"));
-        e
-    }
-
-    /// La boutique d'exemple, sans produit bloqué : tous les boutons peuvent être actifs.
-    fn app_vendeuse(nom: &str) -> Application {
-        Application::nouvelle(etat_vendeur(nom))
-    }
-
-    /// La même, avec un produit épuisé (« Sel ») et un produit sans prix (« Thé »).
-    fn app_vendeuse_avec_blocages(nom: &str) -> Application {
-        let mut etat = etat_vendeur(nom);
-        assert!(etat.ajouter_avec_prix("Sel", "0", "0,80", "")); // stock 0 : épuisé
-        assert!(etat.ajouter("Thé", "0"));
-        assert!(etat.entree("Thé", "5")); // pas de prix
-        Application::nouvelle(etat)
-    }
-
-    /// Avec le VRAI style (polices, espacements) : ce que voit la personne.
-    fn harness_vente(app: Application, taille: Vec2) -> Harness<'static, Application> {
-        let mut h = Harness::builder().with_size(taille).build_ui_state(
-            |ui, app: &mut Application| {
-                palette::appliquer(ui.ctx());
-                dessiner(ui, app);
-            },
-            app,
-        );
-        h.run();
-        h
-    }
-
-    const FENETRE: Vec2 = Vec2::new(TAILLE_FENETRE[0], TAILLE_FENETRE[1]);
-
     fn tuile(nom: &str, prix: &str) -> String {
         ajouter_au_panier(nom, prix)
-    }
-
-    fn cliquer(h: &mut Harness<'static, Application>, libelle: &str) {
-        h.get_by_role_and_label(Role::Button, libelle).click();
-        h.run();
-    }
-
-    fn est_grise(h: &Harness<'static, Application>, libelle: &str) -> bool {
-        h.get_by_role_and_label(Role::Button, libelle)
-            .accesskit_node()
-            .is_disabled()
-    }
-
-    fn nombre_de_pieces(h: &Harness<'static, Application>) -> usize {
-        h.state().etat.as_ref().unwrap().pieces_recentes(100).len()
     }
 
     #[test]
@@ -2480,24 +2130,6 @@ mod tests {
         assert!(panier.top() < produits.top());
     }
 
-    fn verifier_contrastes(textes: &[TextePeint], nom_du_cas: &str) {
-        assert!(
-            textes.len() >= 10,
-            "{nom_du_cas} : trop peu de textes : {}",
-            textes.len()
-        );
-        for t in textes {
-            let rapport = rapport_contraste(t.couleur, t.fond);
-            assert!(
-                rapport >= 4.5,
-                "{nom_du_cas} : « {} » : {rapport:.2}:1 ({:?} sur {:?})",
-                t.texte,
-                t.couleur,
-                t.fond
-            );
-        }
-    }
-
     #[test]
     fn tous_les_textes_peints_de_l_ecran_vente_atteignent_4_5() {
         // Panier rempli, espèces, reçu suffisant : tous les boutons sont actifs.
@@ -2569,49 +2201,6 @@ mod tests {
     }
 
     // ---- Ventes, réglages, prix ---------------------------------------------------------------
-
-    /// Une vente par carte (Pain × 3 = 3,60 €) puis une en espèces (Savon × 1 = 2,50 €),
-    /// affichées sur l'onglet Ventes.
-    fn app_avec_ventes(nom: &str) -> Application {
-        let mut etat = etat_vendeur(nom);
-        assert!(etat.encaisser(&[("Pain".to_string(), 3)], Moyen::Carte, ""));
-        assert!(etat.encaisser(&[("Savon".to_string(), 1)], Moyen::Especes, "5"));
-        etat.effacer_ticket();
-        let mut app = Application::nouvelle(etat);
-        app.onglet = Onglet::Ventes;
-        app
-    }
-
-    /// Un journal modifié à la main après une vente : le programme l'ouvre mais refuse de vendre.
-    fn app_journal_altere(nom: &str) -> Application {
-        let chemin = chemin_temp(nom);
-        {
-            let mut e = etat_vendeur(&format!("{nom}-source"));
-            assert!(e.encaisser(&[("Pain".to_string(), 1)], Moyen::Carte, ""));
-            std::fs::copy(e.chemin(), &chemin).unwrap();
-        }
-        let contenu = std::fs::read_to_string(&chemin).unwrap();
-        // Une modification à la main, dans le journal : le pain vendu passe de 1,20 à 0,10.
-        let altere = contenu.replacen("L;1;Pain;1;120;", "L;1;Pain;1;10;", 1);
-        assert_ne!(
-            contenu, altere,
-            "le fichier n'a pas le format attendu :\n{contenu}"
-        );
-        std::fs::write(&chemin, altere).unwrap();
-        Application::nouvelle(Etat::ouvrir(chemin).unwrap().avec_horloge(|| FIXE))
-    }
-
-    fn est_selectionne(h: &Harness<'static, Application>, libelle: &str) -> Option<bool> {
-        h.get_by_role_and_label(Role::Button, libelle)
-            .accesskit_node()
-            .toggled()
-            .map(|t| t == eframe::egui::accesskit::Toggled::True)
-    }
-
-    fn quantite_en_stock(h: &Harness<'static, Application>, nom: &str) -> u32 {
-        let etat = h.state().etat.as_ref().unwrap();
-        etat.lignes(nom, false)[0].quantite
-    }
 
     #[test]
     fn les_quatre_onglets_s_affichent_et_se_selectionnent() {
