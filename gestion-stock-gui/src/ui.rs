@@ -244,7 +244,13 @@ pub fn dessiner(ui: &mut Ui, app: &mut Application) {
         .frame(
             Frame::new()
                 .fill(couleur(ENTETE_FOND))
-                .inner_margin(Margin::symmetric(20, 0)),
+                // 12 à droite quand le bouton blanc « Retour à la vente » y est, 20 sinon.
+                .inner_margin(Margin {
+                    left: 20,
+                    right: if app.ecran == Ecran::Vente { 20 } else { 12 },
+                    top: 0,
+                    bottom: 0,
+                }),
         )
         .exact_size(56.0)
         .show_separator_line(false)
@@ -400,6 +406,20 @@ mod tests {
         h.get_by_label(NOM_MAGASIN);
         h.get_by_label(&libelle_caisse());
         h.get_by_label("23:13"); // horloge fixe : 14/11/2023 23:13 heure locale
+    }
+
+    /// `maquette/7-recherche.html` : le bouton blanc fait 40 de haut, à 12 du bord droit (la marge
+    /// de l'en-tête est de 20 ailleurs), centré dans les 56 de l'en-tête.
+    #[test]
+    fn le_bouton_retour_de_l_en_tete_a_les_cotes_de_la_maquette() {
+        let mut app = app_vendeuse("entete-retour");
+        app.ecran = Ecran::Recherche;
+        let h = harness_fenetre(app, FENETRE);
+        let bouton = h
+            .get_by_role_and_label(Role::Button, BOUTON_RETOUR_VENTE)
+            .rect();
+        assert_eq!((bouton.top(), bouton.height()), (8.0, 40.0));
+        assert_eq!(bouton.right(), FENETRE.x - 12.0);
     }
 
     #[test]

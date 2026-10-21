@@ -6,7 +6,8 @@
 //! celles de `maquette/2-especes.html` et `3-carte.html`.
 
 use super::composants::{
-    LigneBouton, Style, bandeau_alerte, bouton_a_lignes, bouton_large, discret, modale, zone,
+    LigneBouton, Style, bandeau_alerte, bouton_a_lignes, bouton_large, discret, libelle_et_valeur,
+    modale, modale_centree, zone,
 };
 use super::ticket::corps_du_ticket;
 use super::{Application, Modale};
@@ -95,22 +96,19 @@ fn fermer(app: &mut Application) {
 
 // ---- Espèces ------------------------------------------------------------------------------------
 
-/// Une ligne « libellé à gauche, montant à droite » dans un bandeau coloré.
+/// Une ligne « libellé à gauche, montant à droite » dans un bandeau coloré : 17 points et 32.
 fn ligne_du_bandeau(ui: &mut Ui, libelle: &str, valeur: &str, couleur_texte: [u8; 3]) {
-    ui.horizontal(|ui| {
-        ui.label(
-            RichText::new(libelle)
-                .font(police_disponible(ui.ctx(), Graisse::SemiGrasse, 17.0))
-                .color(couleur(couleur_texte)),
-        );
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            ui.label(
-                RichText::new(valeur)
-                    .font(police_disponible(ui.ctx(), Graisse::Grasse, 32.0))
-                    .color(couleur(couleur_texte)),
-            );
-        });
-    });
+    libelle_et_valeur(
+        ui,
+        RichText::new(libelle)
+            .font(police_disponible(ui.ctx(), Graisse::SemiGrasse, 17.0))
+            .color(couleur(couleur_texte)),
+        17.0,
+        RichText::new(valeur)
+            .font(police_disponible(ui.ctx(), Graisse::Grasse, 32.0))
+            .color(couleur(couleur_texte)),
+        32.0,
+    );
 }
 
 pub(super) fn fenetre_especes(ctx: &Context, app: &mut Application) {
@@ -133,52 +131,51 @@ pub(super) fn fenetre_especes(ctx: &Context, app: &mut Application) {
         if let Some(message) = &erreur {
             bandeau_alerte(ui, &format!("Erreur : {message}"));
         }
-        ui.horizontal(|ui| {
-            ui.label(
-                RichText::new(A_PAYER)
-                    .size(17.0)
+        libelle_et_valeur(
+            ui,
+            RichText::new(A_PAYER)
+                .size(17.0)
+                .color(couleur(TEXTE_SECONDAIRE)),
+            17.0,
+            RichText::new(devise.formater(total))
+                .font(police_disponible(ui.ctx(), Graisse::Grasse, 30.0))
+                .color(couleur(TEXTE)),
+            30.0,
+        );
+        // Le libellé et son champ se tiennent à 6 l'un de l'autre ; les blocs, eux, à 18.
+        ui.scope(|ui| {
+            ui.spacing_mut().item_spacing.y = 6.0;
+            let etiquette = ui.label(
+                RichText::new(CHAMP_RECU)
+                    .size(15.0)
                     .color(couleur(TEXTE_SECONDAIRE)),
             );
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                ui.label(
-                    RichText::new(devise.formater(total))
-                        .font(police_disponible(ui.ctx(), Graisse::Grasse, 30.0))
-                        .color(couleur(TEXTE)),
-                );
-            });
+            Frame::new()
+                .stroke(Stroke::new(2.0, couleur(ACCENT)))
+                .corner_radius(CornerRadius::same(10))
+                .inner_margin(Margin::symmetric(16, 0))
+                .show(ui, |ui| {
+                    zone(
+                        ui,
+                        Vec2::new(ui.available_width(), 60.0),
+                        Layout::left_to_right(Align::Center),
+                        |ui| {
+                            let champ = TextEdit::singleline(&mut app.saisie_recu)
+                                .font(police_disponible(ui.ctx(), Graisse::SemiGrasse, 32.0))
+                                .horizontal_align(Align::RIGHT)
+                                .frame(Frame::NONE)
+                                .desired_width(f32::INFINITY);
+                            let reponse = ui.add(champ).labelled_by(etiquette.id);
+                            if focus {
+                                reponse.request_focus();
+                            }
+                            if reponse.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
+                                valider = true;
+                            }
+                        },
+                    );
+                });
         });
-        ui.spacing_mut().item_spacing.y = 6.0;
-        let etiquette = ui.label(
-            RichText::new(CHAMP_RECU)
-                .size(15.0)
-                .color(couleur(TEXTE_SECONDAIRE)),
-        );
-        Frame::new()
-            .stroke(Stroke::new(2.0, couleur(ACCENT)))
-            .corner_radius(CornerRadius::same(10))
-            .inner_margin(Margin::symmetric(16, 0))
-            .show(ui, |ui| {
-                zone(
-                    ui,
-                    Vec2::new(ui.available_width(), 60.0),
-                    Layout::left_to_right(Align::Center),
-                    |ui| {
-                        let champ = TextEdit::singleline(&mut app.saisie_recu)
-                            .font(police_disponible(ui.ctx(), Graisse::SemiGrasse, 32.0))
-                            .horizontal_align(Align::RIGHT)
-                            .frame(Frame::NONE)
-                            .desired_width(f32::INFINITY);
-                        let reponse = ui.add(champ).labelled_by(etiquette.id);
-                        if focus {
-                            reponse.request_focus();
-                        }
-                        if reponse.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
-                            valider = true;
-                        }
-                    },
-                );
-            });
-        ui.spacing_mut().item_spacing.y = 18.0;
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 8.0;
             let largeur = (ui.available_width() - 3.0 * 8.0) / 4.0;
@@ -311,7 +308,7 @@ pub(super) fn fenetre_terminal(ctx: &Context, app: &mut Application, moyen: Moye
         (_, false) => (AUTRE_ATTENTE, AUTRE_AIDE, ACCENT_DOUX, ACCENT_SURVOL),
     };
     let mut action = None;
-    let ferme = modale(ctx, "terminal", 480.0, titre, |ui| {
+    let ferme = modale_centree(ctx, "terminal", 480.0, titre, |ui| {
         ui.spacing_mut().item_spacing.y = 16.0;
         ui.vertical_centered(|ui| {
             ui.heading(titre);
@@ -320,7 +317,7 @@ pub(super) fn fenetre_terminal(ctx: &Context, app: &mut Application, moyen: Moye
             }
             ui.label(
                 RichText::new(total)
-                    .font(police_disponible(ui.ctx(), Graisse::Grasse, 40.0))
+                    .font(police_disponible(ui.ctx(), Graisse::Grasse, 44.0))
                     .color(couleur(TEXTE)),
             );
             Frame::new()
@@ -458,7 +455,7 @@ pub(super) fn fenetre_vente_terminee(ctx: &Context, app: &mut Application, ticke
         return;
     };
     let (mut nouvelle, mut bascule) = (false, false);
-    let ferme = modale(ctx, "vente-terminee", 480.0, VENTE_TERMINEE, |ui| {
+    let ferme = modale_centree(ctx, "vente-terminee", 480.0, VENTE_TERMINEE, |ui| {
         ui.spacing_mut().item_spacing.y = 14.0;
         ui.vertical_centered(|ui| {
             coche(ui);
@@ -589,6 +586,63 @@ mod tests {
             refuse: false,
         };
         assert_eq!(largeur(carte, CARTE_TITRE), 480.0);
+    }
+
+    /// Les écarts de `maquette/2-especes.html` : 18 entre les blocs, 6 entre « Montant reçu » et
+    /// son champ, un bandeau de monnaie de 74 (16 + une ligne de 42 + 16). Mises bout à bout, les
+    /// côtes donnent une fenêtre de 489 de haut (28 + 28,6 + 18 + 39 + 18 + 19,5 + 6 + 64 + 18 +
+    /// 52 + 18 + 74 + 18 + 60 + 28), comme dans la maquette.
+    #[test]
+    fn la_fenetre_especes_suit_l_espacement_de_la_maquette() {
+        let mut app = a_payer("espacement-especes");
+        app.saisie_recu = "10".to_string();
+        app.modale = Some(Modale::Especes);
+        let h = harness_fenetre(app, FENETRE);
+        let rect = |role, nom: &str| h.get_by_role_and_label(role, nom).rect();
+        let exact = rect(Role::Button, QUICK_EXACT);
+        let valider = rect(Role::Button, BOUTON_VALIDER);
+        let ecart = valider.top() - exact.bottom();
+        assert!(
+            (ecart - (18.0 + 74.0 + 18.0)).abs() < 0.5,
+            "le bandeau de monnaie (74) et ses deux écarts de 18 font {ecart}, pas 110"
+        );
+        let fenetre = rect(Role::Dialog, ESPECES_TITRE);
+        assert!(
+            (fenetre.height() - 489.1).abs() < 1.0,
+            "la fenêtre fait {} de haut au lieu de 489",
+            fenetre.height()
+        );
+    }
+
+    /// `maquette/3-carte.html` : 32 de marge en haut, le total à payer en 44 points.
+    #[test]
+    fn la_fenetre_carte_a_32_de_marge_haute_et_son_total_en_44_points() {
+        let mut app = a_payer("carte-cotes");
+        app.modale = Some(Modale::Terminal {
+            moyen: Moyen::Carte,
+            refuse: false,
+        });
+        let h = harness_fenetre(app, FENETRE);
+        let fenetre = h.get_by_role_and_label(Role::Dialog, CARTE_TITRE).rect();
+        // Le titre porte le même nom que la fenêtre : c'est l'autre nœud, le plus petit.
+        let titre = h
+            .get_all_by_label(CARTE_TITRE)
+            .map(|n| n.rect())
+            .min_by(|a, b| a.height().total_cmp(&b.height()))
+            .unwrap();
+        assert_eq!(titre.top() - fenetre.top(), 32.0);
+        // Le même montant est écrit derrière la fenêtre (sous-total, total en 64 points) :
+        // on cherche celui qui est dans la fenêtre.
+        let total = h
+            .get_all_by_label(&nbsp("4,90EUR"))
+            .map(|n| n.rect())
+            .find(|r| fenetre.contains_rect(*r))
+            .expect("le total à payer est dans la fenêtre");
+        assert!(
+            (total.height() - 44.0 * 1.3).abs() < 0.5,
+            "total de {} de haut",
+            total.height()
+        );
     }
 
     #[test]

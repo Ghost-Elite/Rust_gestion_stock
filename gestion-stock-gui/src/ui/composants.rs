@@ -8,9 +8,9 @@ use crate::palette::{
 use crate::police::{Graisse, famille_disponible, police_disponible};
 use eframe::egui::accesskit::Role;
 use eframe::egui::{
-    self, Button, Color32, Context, CornerRadius, CursorIcon, FontId, Frame, Id, Layout, Margin,
-    Pos2, Response, RichText, Sense, Stroke, StrokeKind, TextEdit, Ui, UiBuilder, Vec2, WidgetInfo,
-    WidgetType,
+    self, Align, Button, Color32, Context, CornerRadius, CursorIcon, FontId, Frame, Id, Label,
+    Layout, Margin, Pos2, Response, RichText, Sense, Stroke, StrokeKind, TextEdit, Ui, UiBuilder,
+    Vec2, WidgetInfo, WidgetType,
 };
 
 // ---- Petits éléments de style -----------------------------------------------------------------
@@ -36,6 +36,39 @@ pub(crate) fn zone_fixe(
     let (rect, _) = ui.allocate_exact_size(taille, Sense::hover());
     let mut enfant = ui.new_child(UiBuilder::new().max_rect(rect).layout(mise_en_page));
     contenu(&mut enfant);
+}
+
+/// L'ascendante de IBM Plex Sans, en fraction du corps : le haut des lettres est à 1,025 em
+/// au-dessus de la ligne de base (la hauteur de ligne est de 1,3 em).
+const ASCENDANTE: f32 = 1.025;
+
+/// Une ligne « libellé à gauche, valeur à droite » dont les deux textes reposent sur la MÊME ligne
+/// de base (« align-items: baseline » de la maquette) : le petit libellé descend d'autant que la
+/// grande valeur est plus haute. Sa hauteur est celle de la valeur (1,3 em).
+pub(crate) fn libelle_et_valeur(
+    ui: &mut Ui,
+    libelle: RichText,
+    taille_libelle: f32,
+    valeur: RichText,
+    taille_valeur: f32,
+) {
+    let (rect, _) = ui.allocate_exact_size(
+        Vec2::new(ui.available_width(), taille_valeur * 1.3),
+        Sense::hover(),
+    );
+    let descente = ASCENDANTE * (taille_valeur - taille_libelle);
+    let mut gauche = ui.new_child(
+        UiBuilder::new()
+            .max_rect(rect.translate(Vec2::new(0.0, descente)))
+            .layout(Layout::left_to_right(Align::Min)),
+    );
+    gauche.add(Label::new(libelle).selectable(false));
+    let mut droite = ui.new_child(
+        UiBuilder::new()
+            .max_rect(rect)
+            .layout(Layout::right_to_left(Align::Min)),
+    );
+    droite.add(Label::new(valeur).selectable(false));
 }
 
 /// Deux lignes de texte (un nom, puis un détail) centrées en hauteur dans une zone de `hauteur`,
@@ -399,10 +432,45 @@ pub(crate) fn modale(
     nom_accessible: &str,
     contenu: impl FnOnce(&mut Ui),
 ) -> bool {
+    modale_avec_marge_haute(
+        ctx,
+        id,
+        largeur,
+        MARGE_DE_LA_FENETRE as i8,
+        nom_accessible,
+        contenu,
+    )
+}
+
+/// La fenêtre dont le contenu est centré (paiement par carte, vente terminée) : la maquette y
+/// met 32 de marge en haut au lieu de 28.
+pub(crate) fn modale_centree(
+    ctx: &Context,
+    id: &str,
+    largeur: f32,
+    nom_accessible: &str,
+    contenu: impl FnOnce(&mut Ui),
+) -> bool {
+    modale_avec_marge_haute(ctx, id, largeur, 32, nom_accessible, contenu)
+}
+
+fn modale_avec_marge_haute(
+    ctx: &Context,
+    id: &str,
+    largeur: f32,
+    marge_haute: i8,
+    nom_accessible: &str,
+    contenu: impl FnOnce(&mut Ui),
+) -> bool {
     let cadre = Frame::new()
         .fill(couleur(SURFACE))
         .corner_radius(CornerRadius::same(16))
-        .inner_margin(Margin::same(MARGE_DE_LA_FENETRE as i8));
+        .inner_margin(Margin {
+            left: MARGE_DE_LA_FENETRE as i8,
+            right: MARGE_DE_LA_FENETRE as i8,
+            top: marge_haute,
+            bottom: MARGE_DE_LA_FENETRE as i8,
+        });
     // Sans fondu d'apparition : à la caisse la fenêtre doit être là tout de suite (et le relevé
     // de contraste des tests ne doit pas voir des fonds translucides).
     let reponse = egui::Modal::new(Id::new(id))

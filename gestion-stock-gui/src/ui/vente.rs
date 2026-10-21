@@ -875,6 +875,7 @@ pub(super) fn fenetre_confirmation(ctx: &Context, app: &mut Application, questio
             ui.label(
                 RichText::new(confirmation_texte(question, articles, &nom))
                     .size(16.0)
+                    .line_height(Some(24.0))
                     .color(couleur(TEXTE_SECONDAIRE)),
             );
             ui.add_space(6.0);
@@ -929,6 +930,7 @@ pub(super) fn fenetre_introuvable(ctx: &Context, app: &mut Application, saisie: 
         ui.label(
             RichText::new(introuvable_texte(saisie))
                 .size(16.0)
+                .line_height(Some(24.0))
                 .color(couleur(TEXTE_SECONDAIRE)),
         );
         ui.add_space(6.0);

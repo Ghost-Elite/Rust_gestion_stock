@@ -1,30 +1,42 @@
 //! L'en-tête sombre (magasin, caisse, heure, retour à la vente) et la fenêtre Menu.
 
-use super::composants::{Style, bouton_large, discret, modale};
+use super::composants::{LigneBouton, Style, bouton_a_lignes, bouton_large, discret, modale};
 use super::{Application, Ecran};
 use crate::etat::chemin_complet;
 use crate::palette::{ENTETE_DISCRET, ENTETE_TEXTE, SURFACE, TEXTE, couleur};
 use crate::police::{Graisse, police_disponible};
 use crate::textes::*;
-use eframe::egui::{
-    Align, Button, Context, CornerRadius, Layout, RichText, Stroke, StrokeKind, Ui, Vec2,
-};
+use eframe::egui::{Align, Context, CornerRadius, Layout, RichText, Stroke, StrokeKind, Ui, Vec2};
 use std::time::Duration;
 
 /// Au bout de combien de temps l'heure affichée est rafraîchie.
 const RAFRAICHIR_HEURE: Duration = Duration::from_secs(10);
 
-/// Le bouton blanc de l'en-tête (retour à la vente). Son anneau de
-/// focus est blanc : l'accent bleu ne ferait pas 3:1 sur le fond sombre.
+/// Le bouton blanc de l'en-tête (retour à la vente) : 40 de haut, 16 de marge de chaque côté du
+/// texte (15 points, semi-gras). Son anneau de focus est blanc : l'accent bleu ne ferait pas 3:1
+/// sur le fond sombre.
 fn bouton_entete(ui: &mut Ui, texte: &str) -> bool {
-    let etiquette =
-        RichText::new(texte).font(police_disponible(ui.ctx(), Graisse::SemiGrasse, 15.0));
-    let reponse = ui.add(
-        Button::new(etiquette.color(couleur(TEXTE)))
-            .fill(couleur(SURFACE))
-            .stroke(Stroke::NONE)
-            .min_size(Vec2::new(0.0, 40.0))
-            .corner_radius(CornerRadius::same(8)),
+    let police = police_disponible(ui.ctx(), Graisse::SemiGrasse, 15.0);
+    let largeur = ui
+        .painter()
+        .layout_no_wrap(texte.to_string(), police, couleur(TEXTE))
+        .size()
+        .x
+        + 32.0;
+    let reponse = bouton_a_lignes(
+        ui,
+        texte,
+        Vec2::new(largeur, 40.0),
+        SURFACE,
+        Stroke::NONE,
+        8,
+        &[LigneBouton {
+            texte,
+            taille: 15.0,
+            graisse: Graisse::SemiGrasse,
+            couleur: TEXTE,
+        }],
+        true,
     );
     if reponse.has_focus() {
         ui.painter().rect_stroke(
