@@ -30,7 +30,7 @@ const LONGUEUR_NOM_MAX: usize = 190;
 
 /// Ce qui peut faire échouer une opération dans une transaction : une règle du métier (le
 /// message est celui du cœur) ou le serveur (que l'on traduit à la sortie).
-enum Echec {
+pub(super) enum Echec {
     Regle(ErreurStock),
     Serveur(mysql::Error),
 }
@@ -58,7 +58,7 @@ fn est_doublon(e: &mysql::Error) -> bool {
 }
 
 /// La clé d'un nom : nettoyé et en minuscules, comme la compare le cœur.
-fn cle(nom: &str) -> String {
+pub(super) fn cle(nom: &str) -> String {
     nom.trim().to_lowercase()
 }
 
@@ -70,7 +70,7 @@ fn trop_long(nom: &str) -> ErreurStock {
 }
 
 /// Refuse un nom (déjà accepté par le cœur) que la colonne ne pourrait pas garder entier.
-fn verifier_longueur(nom: &str) -> Result<(), ErreurStock> {
+pub(super) fn verifier_longueur(nom: &str) -> Result<(), ErreurStock> {
     if nom.chars().count() > LONGUEUR_NOM_MAX || cle(nom).chars().count() > LONGUEUR_NOM_MAX {
         return Err(trop_long(nom));
     }
@@ -112,7 +112,7 @@ fn lire_reglages(tx: &mut Transaction<'_>, verrou: bool) -> Result<Reglages, Ech
     Ok(reglages)
 }
 
-fn ecrire_reglages(tx: &mut Transaction<'_>, reglages: &Reglages) -> Result<(), Echec> {
+pub(super) fn ecrire_reglages(tx: &mut Transaction<'_>, reglages: &Reglages) -> Result<(), Echec> {
     let lignes = [
         ("profil", reglages.profil.code().to_string()),
         ("devise", reglages.devise.code().to_string()),
@@ -292,7 +292,10 @@ fn est_coupure(e: &mysql::Error) -> bool {
 }
 
 /// La tête du journal de ce poste, verrouillée : le dernier numéro et la dernière empreinte.
-fn verrouiller_la_tete(tx: &mut Transaction<'_>, caisse: &str) -> Result<(u64, String), Echec> {
+pub(super) fn verrouiller_la_tete(
+    tx: &mut Transaction<'_>,
+    caisse: &str,
+) -> Result<(u64, String), Echec> {
     let tete: Option<(u64, String)> = tx.exec_first(
         "SELECT dernier_numero, dernier_hash FROM caisse WHERE code = ? FOR UPDATE",
         (caisse,),
@@ -447,6 +450,77 @@ fn lire_un_morceau(
         .collect())
 }
 
+/// Une connexion à la base, avec la vérification que le schéma est de la version attendue et que
+/// la caisse de ce poste existe (elle est créée à la première connexion, avec un journal vide).
+pub(super) fn connexion_verifiee(config: &Configuration) -> Result<Conn, ErreurStock> {
+    let mut connexion = connecter(config)?;
+    match version_de(&mut connexion, config)? {
+        None => {
+            return Err(ErreurStock::Base(format!(
+                "La base « {} » n'est pas encore créée : lancez « stock migrer ».",
+                config.base
+            )));
+        }
+        Some(v) if v < VERSION_COURANTE => {
+            return Err(ErreurStock::Base(format!(
+                "La base n'est pas à jour (version {v}, version attendue {VERSION_COURANTE}) : lancez « stock migrer »."
+            )));
+        }
+        Some(v) if v > VERSION_COURANTE => {
+            return Err(ErreurStock::Base(format!(
+                "La base est plus récente que ce programme (version {v}, ce programme connaît la version {VERSION_COURANTE}) : mettez le programme à jour."
+            )));
+        }
+        Some(_) => {}
+    }
+    connexion
+        .exec_drop(
+            "INSERT IGNORE INTO caisse (code) VALUES (?)",
+            (&config.caisse,),
+        )
+        .map_err(|e| erreur_de_base(&e, config))?;
+    Ok(connexion)
+}
+
+/// Recalcule toute la chaîne du journal de cette caisse, par morceaux de 1 000 pièces (jamais tout
+/// en mémoire), et compare la tête de la caisse : `JournalAltere` à la première pièce qui ne
+/// correspond plus. Sert à `verifier_journal` et, avant la validation, à l'import.
+pub(super) fn verifier_la_chaine(tx: &mut Transaction<'_>, caisse: &str) -> Result<(), Echec> {
+    let tete: Option<(u64, String)> = tx.exec_first(
+        "SELECT dernier_numero, dernier_hash FROM caisse WHERE code = ?",
+        (caisse,),
+    )?;
+    let (tete_numero, tete_hash) = tete.unwrap_or((0, HASH_INITIAL.to_string()));
+    let mut attendu = HASH_INITIAL.to_string();
+    let mut dernier = 0u64;
+    loop {
+        let morceau = lire_un_morceau(tx, caisse, dernier, 1000)?;
+        if morceau.is_empty() {
+            break;
+        }
+        for (numero, piece) in morceau {
+            let altere = Echec::Regle(ErreurStock::JournalAltere { numero });
+            let Ok(piece) = piece else {
+                return Err(altere);
+            };
+            if piece.numero != dernier + 1
+                || piece.hash_precedent != attendu
+                || piece.hash != empreinte(&piece.hash_precedent, &piece)
+            {
+                return Err(altere);
+            }
+            attendu = piece.hash;
+            dernier = piece.numero;
+        }
+    }
+    if dernier != tete_numero || attendu != tete_hash {
+        return Err(Echec::Regle(ErreurStock::JournalAltere {
+            numero: dernier.max(tete_numero),
+        }));
+    }
+    Ok(())
+}
+
 // ---- Le dépôt ---------------------------------------------------------------------------------
 
 pub struct DepotMysql {
@@ -461,35 +535,9 @@ impl DepotMysql {
     /// Se connecte, vérifie que le schéma est de la version attendue et que la caisse de ce poste
     /// existe (elle est créée à la première connexion, avec un journal vide).
     pub fn connecter(config: &Configuration) -> Result<DepotMysql, ErreurStock> {
-        let mut connexion = connecter(config)?;
-        match version_de(&mut connexion, config)? {
-            None => {
-                return Err(ErreurStock::Base(format!(
-                    "La base « {} » n'est pas encore créée : lancez « stock migrer ».",
-                    config.base
-                )));
-            }
-            Some(v) if v < VERSION_COURANTE => {
-                return Err(ErreurStock::Base(format!(
-                    "La base n'est pas à jour (version {v}, version attendue {VERSION_COURANTE}) : lancez « stock migrer »."
-                )));
-            }
-            Some(v) if v > VERSION_COURANTE => {
-                return Err(ErreurStock::Base(format!(
-                    "La base est plus récente que ce programme (version {v}, ce programme connaît la version {VERSION_COURANTE}) : mettez le programme à jour."
-                )));
-            }
-            Some(_) => {}
-        }
-        connexion
-            .exec_drop(
-                "INSERT IGNORE INTO caisse (code) VALUES (?)",
-                (&config.caisse,),
-            )
-            .map_err(|e| erreur_de_base(&e, config))?;
         Ok(DepotMysql {
             config: config.clone(),
-            connexion,
+            connexion: connexion_verifiee(config)?,
             crochet: None,
         })
     }
@@ -895,39 +943,7 @@ impl Depot for DepotMysql {
         let connexion = &mut self.connexion;
         let resultat = (|| -> Result<(), Echec> {
             let mut tx = connexion.start_transaction(options)?;
-            let tete: Option<(u64, String)> = tx.exec_first(
-                "SELECT dernier_numero, dernier_hash FROM caisse WHERE code = ?",
-                (&caisse,),
-            )?;
-            let (tete_numero, tete_hash) = tete.unwrap_or((0, HASH_INITIAL.to_string()));
-            let mut attendu = HASH_INITIAL.to_string();
-            let mut dernier = 0u64;
-            // Toute la chaîne, par morceaux de 1 000 pièces : jamais tout en mémoire.
-            loop {
-                let morceau = lire_un_morceau(&mut tx, &caisse, dernier, 1000)?;
-                if morceau.is_empty() {
-                    break;
-                }
-                for (numero, piece) in morceau {
-                    let altere = Echec::Regle(ErreurStock::JournalAltere { numero });
-                    let Ok(piece) = piece else {
-                        return Err(altere);
-                    };
-                    if piece.numero != dernier + 1
-                        || piece.hash_precedent != attendu
-                        || piece.hash != empreinte(&piece.hash_precedent, &piece)
-                    {
-                        return Err(altere);
-                    }
-                    attendu = piece.hash;
-                    dernier = piece.numero;
-                }
-            }
-            if dernier != tete_numero || attendu != tete_hash {
-                return Err(Echec::Regle(ErreurStock::JournalAltere {
-                    numero: dernier.max(tete_numero),
-                }));
-            }
+            verifier_la_chaine(&mut tx, &caisse)?;
             tx.commit()?;
             Ok(())
         })();

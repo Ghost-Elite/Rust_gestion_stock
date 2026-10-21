@@ -15,21 +15,53 @@ pub const AIDE: &str = r#"Gestion de stock - commandes disponibles :
   stock historique [10]                 Affiche les N derniers mouvements (10 par défaut)
   stock aide                            Affiche ce message
 
+La base MySQL (voir le README, « La base MySQL (XAMPP) ») :
+  stock migrer                          Crée ou met à jour les tables de la base
+  stock importer stock.txt              Copie un fichier de données dans la base (base vide)
+  stock verifier                        Vérifie le journal des ventes de la base
+
 Le nom d'un produit avec des espaces se met entre guillemets.
 Les données sont dans le fichier « stock.txt » (ou celui de la variable STOCK_FICHIER)."#;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Commande {
-    Ajouter { nom: String, seuil: u32 },
-    Entree { nom: String, quantite: u32 },
-    Sortie { nom: String, quantite: u32 },
+    Ajouter {
+        nom: String,
+        seuil: u32,
+    },
+    Entree {
+        nom: String,
+        quantite: u32,
+    },
+    Sortie {
+        nom: String,
+        quantite: u32,
+    },
     Lister,
     Alertes,
-    Historique { limite: usize },
+    Historique {
+        limite: usize,
+    },
     Aide,
+    /// Crée ou met à jour les tables de la base MySQL.
+    Migrer,
+    /// Copie un fichier de données dans la base MySQL.
+    Importer {
+        fichier: String,
+    },
+    /// Vérifie le journal des ventes de la base MySQL.
+    VerifierBase,
 }
 
 impl Commande {
+    /// Vrai pour les commandes qui parlent à la base MySQL et non au fichier de données.
+    pub fn concerne_la_base(&self) -> bool {
+        matches!(
+            self,
+            Commande::Migrer | Commande::Importer { .. } | Commande::VerifierBase
+        )
+    }
+
     /// Vrai si la commande change le stock : seulement alors il faut sauvegarder.
     pub fn modifie_le_stock(&self) -> bool {
         matches!(
@@ -58,6 +90,14 @@ pub fn analyser(args: &[String]) -> Result<Commande, ErreurStock> {
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     match args.as_slice() {
         [] | ["aide"] => Ok(Commande::Aide),
+        ["migrer"] => Ok(Commande::Migrer),
+        ["verifier"] => Ok(Commande::VerifierBase),
+        ["importer", fichier] => Ok(Commande::Importer {
+            fichier: fichier.to_string(),
+        }),
+        ["importer"] => Err(utilisation(
+            "« importer » demande le fichier à copier dans la base, par exemple : stock importer stock.txt.",
+        )),
         ["lister"] => Ok(Commande::Lister),
         ["alertes"] => Ok(Commande::Alertes),
         ["historique"] => Ok(Commande::Historique { limite: 10 }),
@@ -82,7 +122,7 @@ pub fn analyser(args: &[String]) -> Result<Commande, ErreurStock> {
         }),
         [
             commande @ ("aide" | "lister" | "alertes" | "historique" | "ajouter" | "entree"
-            | "sortie"),
+            | "sortie" | "migrer" | "importer" | "verifier"),
             ..,
         ] => Err(utilisation(&format!(
             "Arguments incorrects pour « {commande} »."
@@ -162,6 +202,11 @@ pub fn executer(commande: &Commande, stock: &mut Stock) -> Result<String, Erreur
             }
         }
         Commande::Aide => Ok(AIDE.to_string()),
+        Commande::Migrer | Commande::Importer { .. } | Commande::VerifierBase => {
+            Err(ErreurStock::Utilisation(
+                "Cette commande s'adresse à la base MySQL, pas au fichier de données.".to_string(),
+            ))
+        }
     }
 }
 
@@ -177,6 +222,34 @@ mod tests {
         let mut s = Stock::nouveau();
         s.ajouter_produit("Riz 5kg", 5).unwrap();
         s
+    }
+
+    #[test]
+    fn analyser_les_commandes_de_la_base() {
+        assert_eq!(analyser(&args(&["migrer"])), Ok(Commande::Migrer));
+        assert_eq!(analyser(&args(&["verifier"])), Ok(Commande::VerifierBase));
+        assert_eq!(
+            analyser(&args(&["importer", "mon stock.txt"])),
+            Ok(Commande::Importer {
+                fichier: "mon stock.txt".into()
+            })
+        );
+        let sans_fichier = analyser(&args(&["importer"])).unwrap_err().to_string();
+        assert!(sans_fichier.contains("importer") && sans_fichier.contains("stock aide"));
+        assert!(analyser(&args(&["migrer", "en trop"])).is_err());
+        assert!(analyser(&args(&["verifier", "en trop"])).is_err());
+        assert!(analyser(&args(&["importer", "a", "b"])).is_err());
+        assert!(!Commande::Migrer.modifie_le_stock());
+        assert!(Commande::Migrer.concerne_la_base());
+        assert!(Commande::VerifierBase.concerne_la_base());
+        assert!(!Commande::Lister.concerne_la_base());
+    }
+
+    #[test]
+    fn l_aide_cite_les_commandes_de_la_base() {
+        for commande in ["stock migrer", "stock importer", "stock verifier"] {
+            assert!(AIDE.contains(commande), "{commande}");
+        }
     }
 
     #[test]

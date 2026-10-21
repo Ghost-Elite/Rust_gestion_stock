@@ -2,10 +2,12 @@
 
 pub mod configuration;
 pub mod depot_mysql;
+pub mod import;
 pub mod migrations;
 
 pub use configuration::Configuration;
 pub use depot_mysql::DepotMysql;
+pub use import::{ResumeImport, importer};
 pub use migrations::{VERSION_COURANTE, migrer, version};
 
 use crate::erreur::ErreurStock;
