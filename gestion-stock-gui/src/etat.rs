@@ -4,7 +4,7 @@
 //! réussit on sauvegarde la copie, et seulement si la sauvegarde réussit la copie remplace
 //! le stock. Ainsi la liste affichée ne diffère jamais du fichier, même si l'écriture échoue.
 
-use crate::catalogue::{CATALOGUE, Suggestion, suggerer};
+use crate::catalogue::{CATALOGUE, Suggestion, normaliser, suggerer};
 use crate::horloge;
 use gestion_stock::erreur::ErreurStock;
 use gestion_stock::horodatage::Horodatage;
@@ -217,6 +217,21 @@ impl Etat {
 
     pub fn chemin(&self) -> &Path {
         &self.chemin
+    }
+
+    /// Le jour local, au format `2023-11-14` : il sert à regrouper les tickets par journée.
+    pub fn jour_courant(&self) -> String {
+        (self.horloge.0)().local().jour_iso()
+    }
+
+    /// Les produits dont le nom contient la saisie, sans tenir compte de la casse ni des accents
+    /// (« the » trouve « Thé vert »), triés par nom. Une saisie vide donne tous les produits.
+    pub fn recherche_articles(&self, saisie: &str) -> Vec<LigneProduit> {
+        let cherche = normaliser(saisie);
+        self.lignes("", false)
+            .into_iter()
+            .filter(|ligne| normaliser(&ligne.nom).contains(&cherche))
+            .collect()
     }
 
     /// L'heure locale, `23:13`, pour l'en-tête.
@@ -1319,5 +1334,42 @@ mod tests {
         });
         // 2023-11-14 22:13 UTC + 7 h 02 = 2023-11-15 05:15 UTC, avec un zéro devant l'heure.
         assert_eq!(e.heure_locale(), "05:15");
+    }
+
+    #[test]
+    fn le_jour_courant_s_ecrit_en_iso() {
+        let e = Etat::ouvrir(chemin_temp("jour"))
+            .unwrap()
+            .avec_horloge(|| Horodatage {
+                utc: 1_700_000_000,
+                decalage_minutes: 60,
+            });
+        assert_eq!(e.jour_courant(), "2023-11-14");
+        // Minuit passé en heure locale : le jour change.
+        let e = e.avec_horloge(|| Horodatage {
+            utc: 1_700_000_000 + 3600,
+            decalage_minutes: 60,
+        });
+        assert_eq!(e.jour_courant(), "2023-11-15");
+    }
+
+    #[test]
+    fn la_recherche_d_articles_ignore_la_casse_et_les_accents() {
+        let mut e = Etat::ouvrir(chemin_temp("recherche-articles")).unwrap();
+        assert!(e.ajouter("Thé vert", "0"));
+        assert!(e.ajouter("Riz 5kg", "0"));
+        assert!(e.ajouter("Café moulu", "0"));
+        let noms = |texte: &str| -> Vec<String> {
+            e.recherche_articles(texte)
+                .into_iter()
+                .map(|l| l.nom)
+                .collect()
+        };
+        assert_eq!(noms("the"), ["Thé vert"]);
+        assert_eq!(noms("CAFE"), ["Café moulu"]);
+        assert_eq!(noms("  riz "), ["Riz 5kg"]);
+        assert!(noms("zzz").is_empty());
+        // Une saisie vide donne tous les produits, triés par nom.
+        assert_eq!(noms(""), ["Café moulu", "Riz 5kg", "Thé vert"]);
     }
 }

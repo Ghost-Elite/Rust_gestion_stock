@@ -76,7 +76,8 @@ impl Devise {
         }
     }
 
-    fn symbole(self) -> &'static str {
+    /// Le symbole de la devise : `€`, `$`, `£`, `FCFA`.
+    pub fn symbole(self) -> &'static str {
         match self {
             Devise::Eur => "€",
             Devise::Usd => "$",
@@ -86,7 +87,7 @@ impl Devise {
     }
 
     /// `$12.50` mais `12,50 €` : l'usage change avec la devise.
-    fn symbole_avant(self) -> bool {
+    pub fn symbole_avant(self) -> bool {
         matches!(self, Devise::Usd | Devise::Gbp)
     }
 
@@ -125,6 +126,13 @@ impl Devise {
             ));
         }
         texte
+    }
+
+    /// Le nombre seul, pour l'affichage en grand (le symbole se place à part) : `4,90`,
+    /// `17 025`, `1,234.56`, avec les séparateurs de milliers de la devise et le signe moins.
+    pub fn formater_nombre(self, montant: Montant) -> String {
+        let signe = if montant.0 < 0 { "-" } else { "" };
+        format!("{signe}{}", self.nombre(montant, true))
     }
 
     /// Pour l'affichage : `12,50 €`, `$1,234.50`, `15 000 FCFA`.
@@ -383,5 +391,43 @@ mod tests {
         }
         // `formater_taux` ajoute seulement l'espace insécable et le signe %.
         assert_eq!(Devise::Eur.formater_taux(550), "5,5\u{a0}%");
+    }
+
+    #[test]
+    fn le_nombre_se_formate_sans_symbole_avec_les_milliers() {
+        assert_eq!(Devise::Xof.formater_nombre(Montant(17_025)), "17\u{a0}025");
+        assert_eq!(Devise::Eur.formater_nombre(Montant(490)), "4,90");
+        assert_eq!(Devise::Usd.formater_nombre(Montant(259)), "2.59");
+        assert_eq!(Devise::Usd.formater_nombre(Montant(123_456)), "1,234.56");
+        assert_eq!(Devise::Eur.formater_nombre(Montant(-250)), "-2,50");
+    }
+
+    #[test]
+    fn le_symbole_et_sa_place_sont_publics() {
+        assert_eq!(Devise::Xof.symbole(), "FCFA");
+        assert_eq!(Devise::Eur.symbole(), "\u{20ac}");
+        assert_eq!(Devise::Usd.symbole(), "$");
+        assert_eq!(Devise::Gbp.symbole(), "\u{a3}");
+        assert!(Devise::Usd.symbole_avant() && Devise::Gbp.symbole_avant());
+        assert!(!Devise::Eur.symbole_avant() && !Devise::Xof.symbole_avant());
+    }
+
+    #[test]
+    fn nombre_et_symbole_recomposent_le_montant_formate() {
+        for devise in [Devise::Eur, Devise::Usd, Devise::Gbp, Devise::Xof] {
+            for montant in [Montant(0), Montant(5), Montant(1250), Montant(123_450)] {
+                let nombre = devise.formater_nombre(montant);
+                let recompose = if devise.symbole_avant() {
+                    format!("{}{nombre}", devise.symbole())
+                } else {
+                    format!("{nombre}\u{a0}{}", devise.symbole())
+                };
+                assert_eq!(
+                    recompose,
+                    devise.formater(montant),
+                    "{devise:?} {montant:?}"
+                );
+            }
+        }
     }
 }

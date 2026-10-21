@@ -2146,8 +2146,8 @@ mod tests {
         cliquer(&mut h, &tuile("Savon", "2,50\u{a0}€"));
         let lignes = [
             "Total TTC : 6,10\u{a0}€",
-            "dont TVA 5,5\u{a0}% : 0,19\u{a0}€",
-            "dont TVA 20\u{a0}% : 0,42\u{a0}€",
+            "TVA 5,5\u{a0}% incluse : 0,19\u{a0}€",
+            "TVA 20\u{a0}% incluse : 0,42\u{a0}€",
         ];
         for l in lignes {
             h.get_by_label(l);

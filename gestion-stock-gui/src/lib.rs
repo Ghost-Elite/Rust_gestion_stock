@@ -4,5 +4,6 @@ pub mod etat;
 pub mod horloge;
 pub mod palette;
 pub mod police;
+pub mod scan;
 pub mod textes;
 pub mod ui;

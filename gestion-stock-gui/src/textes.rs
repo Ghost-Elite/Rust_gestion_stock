@@ -30,6 +30,15 @@ pub const ECRAN_REGLAGES: &str = "Réglages";
 pub const BOUTON_FERMER: &str = "Fermer";
 pub const RECHERCHE_TITRE: &str = "Rechercher un article";
 
+/// `0 article`, `1 article`, `2 articles` (en français, zéro est au singulier).
+pub fn compteur_articles(nombre: usize) -> String {
+    if nombre > 1 {
+        format!("{nombre} articles")
+    } else {
+        format!("{nombre} article")
+    }
+}
+
 pub const CHIFFRE_PRODUITS: &str = "Produits";
 pub const CHIFFRE_ALERTES: &str = "En alerte";
 pub const CHIFFRE_UNITES: &str = "Unités en stock";
@@ -209,7 +218,7 @@ pub const LIBELLE_SOUS_TOTAL: &str = "Sous-total";
 
 pub fn libelle_taxe(profil: Profil, taux: &str) -> String {
     match profil {
-        Profil::Europe => format!("dont TVA {taux}"),
+        Profil::Europe => format!("TVA {taux} incluse"),
         Profil::EtatsUnis => format!("Taxe {taux}"),
     }
 }
@@ -255,5 +264,21 @@ mod tests {
         assert_eq!(numero_de_ticket(186), "01-0186");
         assert_eq!(numero_de_ticket(12_345), "01-12345");
         assert_eq!(libelle_caisse(), "Caisse 01");
+    }
+
+    #[test]
+    fn le_compteur_d_articles_accorde_le_singulier_et_le_zero() {
+        assert_eq!(compteur_articles(0), "0 article");
+        assert_eq!(compteur_articles(1), "1 article");
+        assert_eq!(compteur_articles(2), "2 articles");
+    }
+
+    #[test]
+    fn la_tva_s_ecrit_incluse_en_europe_et_la_taxe_aux_etats_unis() {
+        assert_eq!(
+            libelle_taxe(Profil::Europe, "5,5\u{a0}%"),
+            "TVA 5,5\u{a0}% incluse"
+        );
+        assert_eq!(libelle_taxe(Profil::EtatsUnis, "8\u{a0}%"), "Taxe 8\u{a0}%");
     }
 }
