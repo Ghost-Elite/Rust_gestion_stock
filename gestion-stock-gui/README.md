@@ -1,19 +1,22 @@
 # Gestion de stock : l'interface graphique
 
-Une fenêtre sobre pour gérer une petite boutique, en quatre onglets :
+Une caisse de petit supermarché (la maquette « POS Kora Marché »), en cinq écrans :
 
-- **Vente** : des tuiles de produits, un panier, l'encaissement (avec le rendu de monnaie) et le ticket ;
+- **Vente** : un champ pour scanner ou taper un article, le ticket en cours, le total, le paiement (espèces, carte, autre) et une barre de fonctions (rechercher, supprimer l'article, annuler la vente, menu) ;
+- **Recherche** : trouver un article par son nom, voir s'il en reste, le mettre au ticket ;
+- **Historique** : les tickets de la journée (ou d'un autre jour, ou retrouvés par leur numéro), le détail de chacun, et le remboursement ;
 - **Stock** : voir et chercher les produits, les ajouter avec leur prix, enregistrer des entrées et des sorties, être prévenu quand un produit est bientôt épuisé, renommer ou supprimer un produit, consulter l'historique ;
-- **Ventes** : le journal des ventes, où l'on annule une vente ;
 - **Réglages** : Europe ou États-Unis, devise, taux de taxe par défaut.
+
+On passe de l'un à l'autre par le **Menu** (Historique, Stock, Réglages) ; chaque écran a un bouton « Retour à la vente ».
 
 > **Ce programme n'est pas une caisse enregistreuse certifiée.** Lis la section « Caisse et conformité » avant de t'en servir pour de vrais clients.
 
-Elle utilise le même cœur que le programme en ligne de commande (`../gestion-stock`) et lit le même format de fichier.
+La fenêtre utilise le même cœur que le programme en ligne de commande (`../gestion-stock`) et lit le même format de fichier.
 
 ## Apparence
 
-Un fond gris très clair, des cartes blanches aux coins arrondis, une seule couleur d'accent (indigo), des puces pour les états et trois chiffres en haut : produits, produits en alerte, unités en stock. La police est **Inter**, avec deux graisses pour une vraie hiérarchie. Sous 800 points de large, ou quand le texte est agrandi, la fenêtre passe en une seule colonne. Elle s'ouvre en 1100 × 720 points (minimum 640 × 420) : l'écran de vente a besoin de hauteur pour montrer le panier et le paiement ensemble ; dans une fenêtre plus basse, la colonne du panier défile d'un bloc.
+La maquette est dans `../docs/superpowers/specs/2026-10-21-kora-marche-pos/maquette/`. Un en-tête sombre avec le nom du magasin, le numéro de caisse et l'heure ; un fond gris très clair, des cartes blanches plates (un fin bord, pas d'ombre), le bleu `#1E56C8` comme seule couleur d'accent, de grandes cibles (56 à 84 points). La police est **IBM Plex Sans**, en quatre graisses pour une vraie hiérarchie ; ses chiffres ont tous la même largeur, ce qui aligne les montants. La fenêtre s'ouvre en **1366 × 768** points (minimum 640 × 420). Sous 1100 points de large, ou quand le texte est agrandi, l'écran de vente passe en une seule colonne qui défile (le champ de scan d'abord) ; dans une fenêtre basse, la colonne du total et du paiement défile d'un bloc. Le nom du magasin et le numéro de caisse sont pour l'instant fixes (« Kora Marché », caisse 01) : ce seront des réglages.
 
 Les couleurs sont toutes dans `src/palette.rs`, où le contraste de chacune est vérifié par des tests. Pour **voir** la fenêtre sans l'ouvrir, un outil dessine l'interface dans des images :
 
@@ -29,13 +32,15 @@ La liste de départ est dans `src/catalogue.rs` : c'est une proposition, à adap
 
 ## Vendre
 
-L'écran **Vente** est celui qui s'ouvre au lancement. Les produits sont des tuiles : un clic met une unité au panier. Une tuile est grisée, avec la raison **écrite** dessous, quand on ne peut pas vendre : « Épuisé », « Prix manquant » ou « Tout le stock est au panier ». Dans le panier, « − » et « + » changent la quantité, « Retirer » enlève la ligne, « Vider le panier » repart de zéro. Un produit n'a de prix qu'une fois que tu le lui as donné (onglet Stock).
+L'écran **Vente** est celui qui s'ouvre au lancement. Le champ du haut a toujours le focus : un lecteur de codes-barres USB tape le code puis Entrée, comme une personne qui tape un nom. Un nom (ou un morceau de nom d'au moins trois lettres, sans tenir compte des majuscules ni des accents) qui ne correspond qu'à **un** produit le met au ticket ; une quantité s'écrit devant : `3 x pain`, `3*pain` ou `3×pain`. Si plusieurs produits correspondent, la **recherche** s'ouvre avec ce texte ; si aucun, une fenêtre « Article introuvable » le dit. Un produit épuisé, sans prix, ou dont tout le stock est déjà au ticket n'est pas ajouté, et un message dit pourquoi. On clique une ligne pour la choisir : « − » et « + » changent alors sa quantité (« − » est grisé à une unité : on supprime la ligne avec « Supprimer l'article »). Les codes-barres arrivent plus tard : aujourd'hui on cherche par le nom. Un produit n'a de prix qu'une fois que tu le lui as donné (écran Stock).
 
-**Payer.** Trois moyens : Espèces, Carte, Autre. En espèces, tape la somme donnée par le client (ou « Montant juste ») : le **rendu de monnaie** s'affiche en direct, et « Encaisser » reste grisé tant que la somme ne couvre pas le total. Par carte ou « Autre » (chèque, virement, mobile money…), le programme note seulement le moyen : **il n'est relié à aucun terminal de paiement** et ne voit aucun numéro de carte.
+**Raccourcis.** `F2` ouvre la recherche ; `Suppr` supprime l'article choisi, **seulement si le champ de scan est vide** (sinon c'est une touche d'édition) ; `Échap` efface le champ, puis propose d'annuler la vente (rien n'entre au journal : la vente n'a pas eu lieu) ; dans une fenêtre, `Échap` la ferme.
 
-**Encaisser** fait tout ou rien : la vente est validée en entier (stock suffisant, prix connus) ou refusée avec un message, sans rien changer. Le stock baisse et le ticket s'affiche, avec son numéro et l'heure locale. « Nouvelle vente » (ou un clic sur un produit) le ferme ; la vente, elle, reste dans le journal.
+**Payer.** Trois boutons : Espèces, Carte, Autre. En espèces, une fenêtre demande la somme donnée par le client (ou un montant rapide : « Exact », puis des arrondis) : la **monnaie à rendre** s'affiche en direct, et « Valider » reste grisé tant que la somme ne couvre pas le total (le champ n'est pas reformaté pendant la frappe). Par carte ou « Autre » (chèque, virement, mobile money…), **le programme n'est relié à aucun terminal de paiement** et ne voit aucun numéro de carte : la personne à la caisse **confirme à la main** ce que le terminal affiche (« Paiement accepté » ou « Paiement refusé » ; refusé, on peut réessayer ou payer en espèces).
 
-**Europe ou États-Unis** (onglet Réglages) :
+**Valider** fait tout ou rien : la vente est validée en entier (stock suffisant, prix connus) ou refusée avec un message dans la fenêtre, sans rien changer. Le stock baisse et la fenêtre « Vente terminée » montre la monnaie à rendre ; « Voir le ticket » en affiche le détail, avec son numéro (`01-0001` : caisse, puis numéro du journal), l'heure locale, la TVA par taux et la mention « non fiscal ». « Nouvelle vente » la ferme ; la vente, elle, reste dans le journal.
+
+**Europe ou États-Unis** (écran Réglages) :
 
 | | Europe | États-Unis |
 |---|---|---|
@@ -49,7 +54,7 @@ La taxe est calculée **une fois par taux**, sur le total des lignes de ce taux 
 
 **Réglages figés.** Dès la première vente, la devise et le mode de prix ne changent plus (les montants du journal perdraient leur sens) ; le taux par défaut reste modifiable. Un produit qui figure dans une vente ne peut plus être renommé ni supprimé.
 
-**Annuler une vente** (onglet Ventes) demande une confirmation. Rien n'est effacé : une **écriture d'annulation** (montant négatif, avec son propre numéro) est ajoutée au journal, le stock est remis, et la vente d'origine reste visible. Une vente ne s'annule qu'une fois, en entier ; on n'annule pas une annulation. Il n'y a pas encore de remboursement partiel ni d'échange : il faut annuler puis ressaisir la vente.
+**Rembourser un ticket** (écran Historique, bouton « Rembourser ») demande une confirmation. Rien n'est effacé : une **écriture d'annulation** (montant négatif, avec son propre numéro) est ajoutée au journal et apparaît dans l'historique comme une ligne « Remboursement » ; le stock est remis, et le ticket d'origine passe à « Remboursée ». Un ticket ne se rembourse qu'une fois, en entier ; on ne rembourse pas un remboursement. Il n'y a pas encore de remboursement partiel ni d'échange. L'historique montre la journée en cours ; les boutons ‹ et › vont aux autres jours, et taper un numéro dans « N° de ticket » retrouve un ticket quel que soit son jour.
 
 ## Le journal de caisse
 
@@ -63,7 +68,7 @@ Les pièces sont **chaînées** : chacune porte une empreinte SHA-256 calculée 
 | une pièce supprimée, ajoutée ou déplacée au milieu du journal ; un trou dans la numérotation | les **dernières** pièces supprimées (la chaîne qui reste est valide), ou le remplacement du fichier par une ancienne copie |
 | | une modification du stock lui-même (lignes `P` et `M`) : la chaîne ne couvre que le journal des ventes |
 
-Si le journal ne correspond plus, un bandeau l'écrit (onglets Vente et Ventes) et les **ventes et les annulations sont bloquées** ; le stock reste utilisable. Restaure une copie du fichier pour vendre à nouveau.
+Si le journal ne correspond plus, un bandeau l'écrit (écrans Vente et Historique) et les **ventes et les remboursements sont bloqués** ; le stock reste utilisable. Restaure une copie du fichier pour vendre à nouveau.
 
 **Ce n'est pas une protection contre une personne qui voudrait tricher** : la chaîne signale une erreur ou une modification maladroite, elle ne l'empêche pas. Pour un vrai contrôle, il faudrait garder les empreintes ailleurs que dans le même fichier.
 
@@ -99,7 +104,7 @@ Dans un fichier texte, dans le dossier de données de l'utilisateur, **pas** dan
 | Windows | `%APPDATA%\GestionStock\stock.txt` |
 | Linux | `$XDG_DATA_HOME/gestion-stock/stock.txt`, sinon `~/.local/share/gestion-stock/stock.txt` |
 
-Pour utiliser un autre fichier, indique son chemin complet dans la variable d'environnement `STOCK_FICHIER` (elle a la priorité). Le chemin utilisé est toujours affiché en bas de la fenêtre, et sur l'écran d'erreur si le fichier est illisible.
+Pour utiliser un autre fichier, indique son chemin complet dans la variable d'environnement `STOCK_FICHIER` (elle a la priorité). Le chemin utilisé est affiché dans le **Menu** et dans **Réglages**, et sur l'écran d'erreur si le fichier est illisible.
 
 **Tu utilises déjà le programme en ligne de commande ?** Son fichier `stock.txt` est dans le dossier où tu le lançais, pas à l'endroit ci-dessus : la fenêtre afficherait un stock vide. Copie ce fichier à l'emplacement par défaut, ou lance la fenêtre avec `STOCK_FICHIER=/chemin/vers/ton/stock.txt`.
 
@@ -117,20 +122,20 @@ Le but est le niveau AA des WCAG 2.1, qui est la référence de la norme europé
 
 | Critère WCAG 2.1 | État | Comment |
 |---|---|---|
-| 1.4.3 Contraste (texte ≥ 4,5:1) | Tenu | des tests dessinent la fenêtre avec la vraie palette et vérifient chaque texte réellement peint sur son vrai fond (`src/ui.rs`), sur chaque écran : stock, vente (panier, ticket), ventes (avec la confirmation d'annulation) et réglages ; ils s'ajoutent aux tests de la palette (`src/palette.rs`) |
-| 1.4.11 Contraste des composants (≥ 3:1) | Tenu pour les bordures | bordures testées ; la visibilité du focus clavier reste à vérifier à la main |
-| 1.4.1 Couleur seule | Tenu | l'alerte est écrite : « ALERTE : stock bas » ; « Épuisé », « Prix manquant » et « (bas) » sont écrits sous les tuiles ; l'onglet et le moyen de paiement choisis sont annoncés « sélectionné » (état du bouton) en plus d'être colorés |
-| 1.4.4 Redimensionnement du texte | Tenu | zoom au clavier d'egui (`Cmd`/`Ctrl` + `+`, `−`, `0`) ; à 200 % la fenêtre passe en une seule colonne et l'alerte reste visible (test) |
-| 1.4.10 Reflow | Partiel | une seule colonne quand la place manque, et les noms longs passent à la ligne ; l'alerte reste visible à 200 % et en petite fenêtre (test) |
+| 1.4.3 Contraste (texte ≥ 4,5:1) | Tenu | des tests dessinent la fenêtre avec la vraie palette et vérifient chaque texte réellement peint sur son vrai fond, sur chaque écran et chaque fenêtre : vente (ticket vide et rempli, confirmations), paiements, recherche, historique (avec la fenêtre de remboursement et le journal altéré), stock et réglages ; ils s'ajoutent aux tests de la palette (`src/palette.rs`) |
+| 1.4.11 Contraste des composants (≥ 3:1) | Tenu pour les champs | le contour des **champs de saisie** est `#848B96` (au moins 3,07:1 sur le fond de page comme sur les cartes) ; la maquette avait `#AEB5BF` (2,07:1), assombri au minimum. Les boutons secondaires gardent le contour clair de la maquette (`#D5DAE0`, 1,41:1) : ils sont identifiés par leur texte, pas par leur bord. Le focus clavier est un anneau de 2 points, dessiné aussi sur les boutons à contour fixe (test) ; sa visibilité reste à vérifier à la main |
+| 1.4.1 Couleur seule | Tenu | les états sont écrits : « ALERTE : stock bas », « Rupture de stock », « Plus que 3 en stock », « Prix manquant », « Payée », « Remboursée », « Remboursement » ; la ligne choisie du ticket et du historique est annoncée « sélectionnée » (état du bouton) en plus d'être colorée |
+| 1.4.4 Redimensionnement du texte | Tenu | zoom au clavier d'egui (`Cmd`/`Ctrl` + `+`, `−`, `0`) ; à 200 % la vente, l'historique et la recherche passent en une seule colonne sans déborder à l'horizontale (tests) |
+| 1.4.10 Reflow | Partiel | une seule colonne quand la place manque ; les noms longs sont coupés par des points de suspension (dans le ticket, la recherche et l'historique) au lieu de passer à la ligne |
 | 2.1.1 Clavier | À vérifier à la main | tout se fait avec `Tab`, `Maj+Tab`, `Espace`, `Entrée` |
 | 3.3.1 / 3.3.3 Erreurs | Tenu | messages « Erreur : … » en français qui disent quoi faire ; un bouton reste grisé tant que son champ est vide |
 | 3.3.2 Étiquettes | Tenu | chaque champ est relié à son libellé ; vérifié par des tests qui interrogent le **rôle** (champ de saisie) et le nom |
-| 4.1.2 Nom, rôle, valeur | Partiel | noms et rôles vérifiés par des tests, y compris sur la vente : les tuiles et les boutons « − » et « + » ont un nom complet (« Ajouter Pain au panier (1,20 €) », « Retirer une unité de Pain »), les onglets et les choix sont des boutons à bascule « sélectionné » ; le rendu avec un lecteur d'écran reste à vérifier à la main |
-| 4.1.3 Messages d'état | **Non couvert** | egui 0.35 n'a pas de région « live » : un lecteur d'écran n'annonce pas tout seul les messages du bas de la fenêtre |
-| 2.4.3 Ordre du focus | **Limite connue** | l'ordre de `Tab` suit l'ordre de dessin : en disposition à deux colonnes, le panneau de droite (ajout et commandes sur le stock, panier et paiement sur la vente) vient avant la recherche et la liste |
+| 4.1.2 Nom, rôle, valeur | Partiel | noms et rôles vérifiés par des tests : le champ de scan (nom = son texte d'invite), les lignes du ticket (« Choisir Pain »), « − » et « + » (« Retirer une unité de Pain »), les cases de la barre de fonctions (« Rechercher (F2) »), les fenêtres (rôle « dialogue » nommé), « Rembourser le ticket 01-0001 » ; le rendu avec un lecteur d'écran reste à vérifier à la main |
+| 4.1.3 Messages d'état | **Non couvert** | egui 0.35 n'a pas de région « live » : un lecteur d'écran n'annonce pas tout seul les messages éphémères en bas de l'écran, ni « Ajouté ✓ » sur la recherche |
+| 2.4.3 Ordre du focus | **Limite connue** | l'ordre de `Tab` suit l'ordre de dessin : sur la vente, la barre de fonctions et la colonne de paiement viennent avant le ticket ; en fenêtre étroite (une colonne), le champ de scan passe en premier |
 | 1.3.1 Information et relations | **Limite connue** | la liste est faite de cartes, pas d'un vrai tableau : un lecteur d'écran lit chaque ligne comme une suite de textes (nom, état, seuil, quantité) sans structure de tableau ; chaque valeur est écrite en toutes lettres (« Seuil : 5 », « en stock ») pour rester compréhensible |
 
-**Autres limites connues :** `Entrée` ne valide pas un formulaire (il faut activer le bouton) ; après « Supprimer le produit » au clavier, le bouton disparaît et le focus est perdu ; un seul thème clair ; les textes de l'interface sont dans `src/textes.rs` mais les messages de résultat sont dans `src/etat.rs` et ceux de la bibliothèque dans `../gestion-stock/src/erreur.rs` (une traduction devra toucher ces trois endroits) ; la qualité de la lecture par un lecteur d'écran dépend d'egui et d'AccessKit ; les onglets sont des boutons à bascule et pas des « onglets » au sens de WAI-ARIA (egui n'a pas ce rôle) ; les tuiles de produits sont dessinées à la main (elles gardent le focus clavier avec son contour et un nom complet, mais pas toutes les finesses d'un bouton egui) ; un contrôle grisé (par exemple « Encaisser » tant que la somme ne couvre pas le total) est dispensé de contraste par les WCAG, et la raison est écrite à côté.
+**Autres limites connues :** un seul thème clair ; les textes de l'interface sont dans `src/textes.rs` mais les messages de résultat sont dans `src/etat.rs` et ceux de la bibliothèque dans `../gestion-stock/src/erreur.rs` (une traduction devra toucher ces trois endroits) ; la qualité de la lecture par un lecteur d'écran dépend d'egui et d'AccessKit ; les boutons des fenêtres, de la barre de fonctions et de la recherche sont dessinés à la main (ils gardent le focus clavier avec son anneau et un nom complet, mais pas toutes les finesses d'un bouton egui) ; `Suppr` ne supprime un article que si le champ de scan est vide ; un contrôle grisé (par exemple « Valider » tant que la somme ne couvre pas le total) est dispensé de contraste par les WCAG, et la raison est écrite à côté.
 
 ## Vie privée
 
@@ -141,8 +146,8 @@ Le programme ne collecte aucune donnée personnelle, n'ouvre aucune connexion r�
 La liste complète des dépendances, pour **toutes** les plateformes (Windows, macOS, Linux), est dans [LICENCES-TIERS.txt](LICENCES-TIERS.txt). Elles sont sous licences permissives (MIT, Apache-2.0, Zlib, BSD, ISC, BSL-1.0, Unicode et assimilées).
 
 - Deux dépendances sont proposées avec une option copyleft **en plus** d'une option permissive : `self_cell` (« Apache-2.0 OR GPL-2.0-only ») et `r-efi` (« MIT OR Apache-2.0 OR LGPL-2.1-or-later »). On utilise toujours l'option permissive.
-- Deux polices sont **intégrées au programme** : **Inter** (Regular et SemiBold, licence SIL OFL 1.1, copyright The Inter Project Authors ; le texte de la licence est dans `assets/polices/LICENCE-Inter-OFL-1.1.txt`), tirée de la version 4.0 officielle (`Inter-4.0.zip`, SHA-256 `ff970a5d4561a04f102a7cb781adbd6ac4e9b6c460914c7a101f15acb7f7d1a4`), et les polices par défaut d'egui (OFL-1.1 et Ubuntu-font-1.0), gardées en secours pour les symboles.
-- Si tu distribues le programme à d'autres personnes, joins les mentions de licence des dépendances (MIT, Apache-2.0, OFL, Ubuntu-font) et celle d'Inter.
+- Deux familles de polices sont **intégrées au programme** : **IBM Plex Sans** (Regular, Medium, SemiBold et Bold ; licence SIL OFL 1.1, copyright 2017 IBM Corp. avec le nom réservé « Plex » ; le texte de la licence est dans `assets/polices/LICENCE-IBM-Plex-OFL-1.1.txt`), tirée de la version 1.1.0 officielle (`ibm-plex-sans.zip`, SHA-256 `fb365d910566e6d199cc2c15579a7dd9a267128e18431a394ed81f1970c69200` ; les empreintes des quatre fichiers sont dans `src/police.rs`), et les polices par défaut d'egui (OFL-1.1 et Ubuntu-font-1.0), gardées en secours pour les symboles.
+- Si tu distribues le programme à d'autres personnes, joins les mentions de licence des dépendances (MIT, Apache-2.0, OFL, Ubuntu-font) et celle d'IBM Plex Sans.
 - Le code des deux programmes de ce dépôt n'a pas encore de licence choisie : c'est à son auteur de la décider.
 
 La liste se régénère avec `cargo tree --prefix none --format "{p} {l}" -e normal --target all`.
@@ -154,13 +159,13 @@ La liste se régénère avec `cargo tree --prefix none --format "{p} {l}" -e nor
 3. Agrandis le texte avec `Cmd` + `+` (macOS) ou `Ctrl` + `+`, jusqu'à 200 % : la fenêtre passe en une colonne et l'alerte reste visible. Reviens avec `Cmd`/`Ctrl` + `0`.
 4. Sur macOS, active VoiceOver (`Cmd+F5`) et vérifie que les champs et les boutons sont annoncés avec leur nom.
 5. Provoque des erreurs : sortie trop grande, nom avec `;` : un message clair s'affiche et rien ne change. Un bouton est grisé tant que son champ est vide.
-6. Ferme puis rouvre : les données sont toujours là, au chemin affiché en bas.
+6. Ferme puis rouvre : les données sont toujours là, au chemin affiché dans le Menu et dans Réglages.
 7. Ouvre deux fenêtres sur le même fichier, enregistre dans la première, puis dans la seconde : la seconde refuse et le dit.
-8. **Vente en espèces avec rendu.** Dans un fichier d'essai (`STOCK_FICHIER=/tmp/essai.txt`), onglet Stock : ajoute « Pain » avec le prix 1,20 et le taux 5,5, puis une entrée de 10. Onglet Vente : clique deux fois sur « Pain », tape 5 comme montant reçu : « Rendu de monnaie : 2,60 € » s'affiche. Encaisse : le ticket n° 1 montre « Total TTC : 2,40 € », « dont TVA 5,5 % : 0,13 € » et la mention « non fiscal » ; le stock est passé à 8.
-9. **Annulation.** Onglet Ventes : annule la vente n° 1. Le premier clic demande confirmation (« Garder la vente » ne change rien) ; après confirmation, une ligne « Annulation de la vente n° 1 » apparaît, la vente reste visible et le stock est revenu à 10.
-10. **Réglages.** Avec un fichier d'essai **neuf** (après une vente, devise et mode de prix sont figés) : onglet Réglages, choisis États-Unis, USD et le taux 8,25, enregistre : à la vente, les montants sont en $ et la taxe s'ajoute au prix hors taxe.
-11. **Journal modifié à la main.** Ferme la fenêtre, ouvre le fichier d'essai, change un montant dans une ligne `L;` ou `S;`, relance : un bandeau le dit, « Encaisser » et « Annuler la vente » sont grisés, le stock reste utilisable. Remets le fichier d'origine.
-12. **Tout sans la souris**, jusqu'à l'encaissement : `Tab` jusqu'à une tuile, `Espace` pour l'ajouter, `Tab` jusqu'au montant reçu, puis « Encaisser ».
+8. **Vente en espèces avec rendu.** Dans un fichier d'essai (`STOCK_FICHIER=/tmp/essai.txt`), écran Stock (Menu → Stock) : ajoute « Pain » avec le prix 1,20 et le taux 5,5, puis une entrée de 10. Retour à la vente : tape `2 x pain` puis Entrée, clique « Espèces », tape 5 comme montant reçu : « Monnaie à rendre » affiche 2,60 €. Valide : « Vente terminée » montre la monnaie ; « Voir le ticket » donne le n° 01-0001, « Total TTC : 2,40 € », « TVA 5,5 % incluse : 0,13 € » et la mention « non fiscal » ; le stock est passé à 8.
+9. **Remboursement.** Menu → Historique : choisis le ticket 01-0001 et clique « Rembourser ». La fenêtre demande confirmation (« Annuler » ne change rien) ; après confirmation, une ligne « Remboursement » (01-0002, montant négatif) apparaît, le ticket 01-0001 passe à « Remboursée » et le stock est revenu à 10.
+10. **Réglages.** Avec un fichier d'essai **neuf** (après une vente, devise et mode de prix sont figés) : Menu → Réglages, choisis États-Unis, USD et le taux 8,25, enregistre : à la vente, les montants sont en $ et la taxe s'ajoute au prix hors taxe.
+11. **Journal modifié à la main.** Ferme la fenêtre, ouvre le fichier d'essai, change un montant dans une ligne `L;` ou `S;`, relance : un bandeau le dit, « Espèces », « Carte », « Autre » et « Rembourser » sont grisés, le stock reste utilisable. Remets le fichier d'origine.
+12. **Tout sans la souris**, jusqu'à la vente : tape un nom dans le champ de scan puis Entrée, `Tab` jusqu'à « Carte », `Espace`, `Tab` jusqu'à « Paiement accepté », `Entrée`.
 
 ## Pour les développeurs
 
@@ -170,4 +175,4 @@ cargo clippy --all-targets -- -D warnings
 cargo fmt --check
 ```
 
-La logique est dans `src/etat.rs` (testable sans fenêtre : vente, annulation, réglages, rendu de monnaie), le dessin dans `src/ui.rs`, les couleurs dans `src/palette.rs`. Les calculs d'argent, de taxe et de journal sont dans la bibliothèque (`../gestion-stock/src/monnaie.rs`, `vente.rs`, `journal.rs`). Dans les tests de `src/ui.rs`, `textes_peints` dessine l'application avec la vraie palette et relève chaque texte peint avec son fond : c'est ce test qui garantit le contraste réel, pas seulement celui des constantes.
+La logique est dans `src/etat.rs` (testable sans fenêtre : vente, remboursement, historique, détail d'un ticket, réglages, rendu de monnaie) et `src/scan.rs` (ce que veut dire le texte du champ de scan). Le dessin est dans `src/ui.rs` (l'application, les écrans, les messages) et `src/ui/` : un module par écran (`vente.rs`, `paiement.rs`, `ticket.rs`, `recherche.rs`, `historique.rs`, `stock.rs`, `reglages.rs`), l'en-tête et le Menu (`entete.rs`) et les éléments communs (`composants.rs`). Les couleurs sont dans `src/palette.rs`, la police dans `src/police.rs`. Les calculs d'argent, de taxe et de journal sont dans la bibliothèque (`../gestion-stock/src/monnaie.rs`, `vente.rs`, `journal.rs`). Dans les tests (`src/ui/essais.rs`), `textes_peints` dessine l'application avec la vraie palette et relève chaque texte peint avec son fond : c'est ce test qui garantit le contraste réel, pas seulement celui des constantes.

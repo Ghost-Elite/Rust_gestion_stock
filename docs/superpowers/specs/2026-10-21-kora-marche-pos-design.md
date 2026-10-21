@@ -1,6 +1,11 @@
 # Caisse Kora Marché — refonte de l'interface et des fonctions de caisse
 
-Date : 2026-10-21 · Statut : **brouillon, en attente d'approbation**
+Date : 2026-10-21 · Statut : **approuvé ; étape A faite le 2026-10-21, restent les étapes B, C et D**
+
+## Avancement
+
+- **Étape A (apparence, fonctions existantes) : faite**, plan `docs/superpowers/plans/2026-10-21-kora-marche-etape-a.md`. Couvre : le langage visuel (§ 5), la navigation (§ 6, sauf le « Menu » de l'écran Ouverture qui n'existe pas encore), la vente avec scan par nom, le paiement espèces, carte et autre (§ 7.1 à 7.3), la recherche (§ 7.4), l'historique avec remboursement sans code superviseur (§ 7.6), Stock et Réglages restylés (§ 7.9, sans les nouveaux champs).
+- Restent : **B** (format v3, code-barres, Mobile money, remises, code superviseur, mise en attente), **C** (ouverture, dépôt, clôture, rapport, « Imprimer » / « Réimprimer ») et **D** (cartes fidélité). Chacune aura son plan.
 
 ## 1. Intention
 
