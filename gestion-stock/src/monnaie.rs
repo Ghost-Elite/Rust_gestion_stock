@@ -98,9 +98,11 @@ impl Devise {
         }
     }
 
+    /// En français, les milliers se séparent par une espace fine insécable (U+202F), et le symbole
+    /// se détache par une espace insécable ordinaire : « 17 025 FCFA ».
     fn separateur_milliers(self) -> char {
         match self {
-            Devise::Eur | Devise::Xof => '\u{a0}',
+            Devise::Eur | Devise::Xof => '\u{202f}',
             Devise::Usd | Devise::Gbp => ',',
         }
     }
@@ -245,7 +247,7 @@ mod tests {
         assert_eq!(Devise::Eur.formater(Montant(1250)), "12,50\u{a0}€");
         assert_eq!(
             Devise::Eur.formater(Montant(123450)),
-            "1\u{a0}234,50\u{a0}€"
+            "1\u{202f}234,50\u{a0}€"
         );
         assert_eq!(Devise::Eur.formater(Montant(5)), "0,05\u{a0}€");
         assert_eq!(Devise::Eur.formater(Montant(-1250)), "-12,50\u{a0}€");
@@ -254,7 +256,7 @@ mod tests {
         assert_eq!(Devise::Gbp.formater(Montant(1250)), "£12.50");
         assert_eq!(
             Devise::Xof.formater(Montant(15000)),
-            "15\u{a0}000\u{a0}FCFA"
+            "15\u{202f}000\u{a0}FCFA"
         );
         assert_eq!(Devise::Xof.formater(Montant(0)), "0\u{a0}FCFA");
     }
@@ -395,7 +397,10 @@ mod tests {
 
     #[test]
     fn le_nombre_se_formate_sans_symbole_avec_les_milliers() {
-        assert_eq!(Devise::Xof.formater_nombre(Montant(17_025)), "17\u{a0}025");
+        assert_eq!(
+            Devise::Xof.formater_nombre(Montant(17_025)),
+            "17\u{202f}025"
+        );
         assert_eq!(Devise::Eur.formater_nombre(Montant(490)), "4,90");
         assert_eq!(Devise::Usd.formater_nombre(Montant(259)), "2.59");
         assert_eq!(Devise::Usd.formater_nombre(Montant(123_456)), "1,234.56");
