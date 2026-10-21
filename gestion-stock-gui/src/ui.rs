@@ -30,6 +30,7 @@ mod entete;
 #[cfg(test)]
 mod essais;
 mod paiement;
+mod recherche;
 mod ticket;
 mod vente;
 
@@ -124,6 +125,10 @@ pub struct Application {
     pub focus_scan: bool,
     /// Ce qui est tapé dans la recherche d'articles.
     pub recherche_articles: String,
+    /// L'article que l'on vient d'ajouter depuis la recherche (son bouton dit « Ajouté ✓ »).
+    pub ajoute: Option<String>,
+    /// Vrai quand le champ de la recherche doit prendre le focus à l'image suivante.
+    pub focus_recherche: bool,
     /// La fenêtre modale ouverte, s'il y en a une.
     pub modale: Option<Modale>,
     /// Le message éphémère affiché en bas de l'écran.
@@ -186,6 +191,14 @@ impl Application {
         self.panier.retain(|(_, quantite)| *quantite > 0);
     }
 
+    /// Ouvre l'écran de recherche avec ce texte déjà tapé.
+    pub fn ouvrir_la_recherche(&mut self, texte: String) {
+        self.recherche_articles = texte;
+        self.ajoute = None;
+        self.focus_recherche = true;
+        self.ecran = Ecran::Recherche;
+    }
+
     /// Affiche un message de quelques secondes en bas de l'écran.
     pub fn message(&mut self, texte: impl Into<String>) {
         self.toast = Some(Toast {
@@ -242,9 +255,7 @@ pub fn dessiner(ui: &mut Ui, app: &mut Application) {
     }
     match app.ecran {
         Ecran::Vente => vente::ecran_vente(ui, app),
-        Ecran::Recherche => page(ui, 900.0, |ui| {
-            carte(ui, |ui| titre_de_carte(ui, RECHERCHE_TITRE));
-        }),
+        Ecran::Recherche => recherche::ecran_recherche(ui, app),
         Ecran::Historique => page(ui, 900.0, |ui| ecran_ventes(ui, app)),
         Ecran::Stock => ecran_stock(ui, app),
         Ecran::Reglages => page(ui, 640.0, |ui| ecran_reglages(ui, app)),

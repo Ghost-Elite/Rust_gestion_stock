@@ -9,7 +9,7 @@ use super::composants::{
     discret, modale, repere, zone,
 };
 use super::{
-    Application, Confirmation, Ecran, LARGEUR_CAISSE_DEUX_COLONNES, LARGEUR_DEUX_COLONNES, Modale,
+    Application, Confirmation, LARGEUR_CAISSE_DEUX_COLONNES, LARGEUR_DEUX_COLONNES, Modale,
 };
 use crate::palette::{
     ACCENT, ACCENT_DOUX, ACCENT_TEXTE, ALERTE_BORD, ALERTE_TEXTE, BORDURE_BOUTON, FILET,
@@ -99,8 +99,7 @@ fn valider_scan(app: &mut Application) {
             ajouter_au_ticket(app, &nom, quantite);
         }
         ResultatScan::Plusieurs => {
-            app.recherche_articles = texte_recherche(&saisie);
-            app.ecran = Ecran::Recherche;
+            app.ouvrir_la_recherche(texte_recherche(&saisie));
         }
         ResultatScan::Introuvable(texte) => app.modale = Some(Modale::Introuvable(texte)),
     }
@@ -131,8 +130,7 @@ pub(super) fn raccourcis(ui: &mut Ui, app: &mut Application) {
         )
     });
     if f2 {
-        app.recherche_articles.clear();
-        app.ecran = Ecran::Recherche;
+        app.ouvrir_la_recherche(String::new());
     }
     if suppr && app.ligne_choisie.is_some() {
         app.modale = Some(Modale::Confirmer(Confirmation::SupprimerArticle));
@@ -795,10 +793,7 @@ fn case_de_fonction(ui: &mut Ui, app: &mut Application, fonction: Fonction, larg
         return;
     }
     match fonction {
-        Fonction::Rechercher => {
-            app.recherche_articles.clear();
-            app.ecran = Ecran::Recherche;
-        }
+        Fonction::Rechercher => app.ouvrir_la_recherche(String::new()),
         Fonction::Supprimer => {
             app.modale = Some(Modale::Confirmer(Confirmation::SupprimerArticle));
         }
@@ -907,8 +902,7 @@ pub(super) fn fenetre_introuvable(ctx: &Context, app: &mut Application, saisie: 
         });
     });
     if chercher {
-        app.recherche_articles = saisie.to_string();
-        app.ecran = Ecran::Recherche;
+        app.ouvrir_la_recherche(saisie.to_string());
     }
     if encore || chercher || ferme {
         app.modale = None;

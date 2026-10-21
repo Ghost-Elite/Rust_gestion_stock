@@ -61,6 +61,7 @@ pub(super) fn entete(ui: &mut Ui, app: &mut Application) {
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             if app.ecran != Ecran::Vente && bouton_entete(ui, BOUTON_RETOUR_VENTE) {
                 app.ecran = Ecran::Vente;
+                app.focus_scan = true;
             }
             if app.ecran != Ecran::Historique {
                 ui.label(

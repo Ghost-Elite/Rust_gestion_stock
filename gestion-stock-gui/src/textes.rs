@@ -29,6 +29,23 @@ pub const ECRAN_STOCK: &str = "Stock";
 pub const ECRAN_REGLAGES: &str = "Réglages";
 pub const BOUTON_FERMER: &str = "Fermer";
 pub const RECHERCHE_TITRE: &str = "Rechercher un article";
+pub const CHAMP_RECHERCHE_ARTICLE: &str = "Nom de l'article";
+pub const AUCUN_ARTICLE: &str = "Aucun article trouvé. Vérifiez l'orthographe.";
+pub const EN_STOCK: &str = "En stock";
+pub const RUPTURE: &str = "Rupture de stock";
+pub const BOUTON_AJOUTER_ARTICLE: &str = "Ajouter";
+pub const BOUTON_AJOUTE: &str = "Ajouté ✓";
+pub const BOUTON_INDISPONIBLE: &str = "Indisponible";
+
+/// `Plus que 3 en stock`.
+pub fn plus_que(quantite: u32) -> String {
+    format!("Plus que {quantite} en stock")
+}
+
+/// Le nom du bouton qui met un article au ticket : `Ajouter Pain au ticket`.
+pub fn ajouter_article(nom: &str) -> String {
+    format!("Ajouter {nom} au ticket")
+}
 
 // ---- L'écran de vente ---------------------------------------------------------------------------
 /// Le texte d'invite du champ de scan, aussi son nom pour les lecteurs d'écran.

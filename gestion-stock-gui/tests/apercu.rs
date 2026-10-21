@@ -168,6 +168,16 @@ fn apercu_vente_terminee() {
 
 #[test]
 #[ignore = "outil de design : lancer à la main"]
+fn apercu_recherche() {
+    let mut app = application_exemple("recherche");
+    app.ouvrir_la_recherche("a".into());
+    app.panier = vec![("Riz parfumé 5kg".to_string(), 1)];
+    app.ajoute = Some("Riz parfumé 5kg".to_string());
+    capturer("recherche", Vec2::new(1366.0, 768.0), app);
+}
+
+#[test]
+#[ignore = "outil de design : lancer à la main"]
 fn apercu_vente_etroite() {
     capturer(
         "vente_etroite",
