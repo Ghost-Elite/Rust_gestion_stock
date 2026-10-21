@@ -247,3 +247,219 @@ fn une_regle_refusee_ne_laisse_aucune_trace() {
     let p = d.instantane().unwrap().produits()[0].clone();
     assert_eq!((p.prix, p.taux_bp), (None, None));
 }
+
+// ---- Entrées, sorties, renommer, supprimer ------------------------------------------------------
+
+use gestion_stock::stock::Genre;
+
+fn historique(d: &mut DepotMysql) -> Vec<(Genre, String, u32)> {
+    d.instantane()
+        .unwrap()
+        .historique()
+        .iter()
+        .map(|m| (m.genre, m.nom.clone(), m.quantite))
+        .collect()
+}
+
+fn quantite(d: &mut DepotMysql, nom: &str) -> u32 {
+    d.instantane()
+        .unwrap()
+        .produits()
+        .iter()
+        .find(|p| p.nom == nom)
+        .unwrap()
+        .quantite
+}
+
+/// Une vente écrite à la main : la vente par `DepotMysql` n'est pas encore réalisée à ce stade.
+fn vente_a_la_main(base: &BaseJetable, nom: &str) {
+    let zeros = "0".repeat(64);
+    let mut c = base.connexion();
+    c.exec_drop(
+        "INSERT INTO piece (caisse, numero, genre, annule_numero, utc, decalage_minutes, \
+         total, moyen, recu, rendu, hash_precedent, hash) \
+         VALUES ('01', 1, 'V', NULL, 1700000000, 0, 100, 'C', 100, 0, ?, ?)",
+        (&zeros, &zeros),
+    )
+    .unwrap();
+    c.exec_drop(
+        "INSERT INTO piece_ligne (caisse, numero, rang, nom, nom_cle, quantite, prix, taux_bp) \
+         VALUES ('01', 1, 0, ?, ?, 1, 100, 0)",
+        (nom, nom.to_lowercase()),
+    )
+    .unwrap();
+}
+
+#[test]
+#[ignore = "demande un serveur MySQL (KORA_TEST_URL)"]
+fn une_entree_puis_une_sortie_donnent_le_stock_juste_et_des_mouvements() {
+    let base = BaseJetable::creer();
+    let mut d = depot(&base);
+    d.ajouter_produit("Riz", 0).unwrap();
+    assert_eq!(d.enregistrer_entree("riz", 10).unwrap().quantite, 10);
+    assert_eq!(d.enregistrer_sortie("RIZ", 4).unwrap().quantite, 6);
+    assert_eq!(quantite(&mut d, "Riz"), 6);
+    assert_eq!(
+        historique(&mut d),
+        [
+            (Genre::Entree, "Riz".to_string(), 10),
+            (Genre::Sortie, "Riz".to_string(), 4)
+        ]
+    );
+    let caisses: Vec<String> = base
+        .connexion()
+        .query("SELECT DISTINCT caisse FROM mouvement")
+        .unwrap();
+    assert_eq!(
+        caisses,
+        ["01"],
+        "chaque mouvement note la caisse qui l'a fait"
+    );
+}
+
+#[test]
+#[ignore = "demande un serveur MySQL (KORA_TEST_URL)"]
+fn un_mouvement_refuse_ne_change_rien() {
+    let base = BaseJetable::creer();
+    let mut d = depot(&base);
+    d.ajouter_produit("Riz", 0).unwrap();
+    d.enregistrer_entree("Riz", 3).unwrap();
+    assert_eq!(
+        d.enregistrer_sortie("Riz", 4).unwrap_err(),
+        ErreurStock::StockInsuffisant {
+            nom: "Riz".to_string(),
+            disponible: 3,
+            demandee: 4
+        }
+    );
+    assert_eq!(
+        d.enregistrer_entree("Riz", 0).unwrap_err(),
+        ErreurStock::QuantiteNulle
+    );
+    assert_eq!(
+        d.enregistrer_entree("Inconnu", 1).unwrap_err(),
+        ErreurStock::ProduitInconnu("Inconnu".to_string())
+    );
+    assert_eq!(
+        d.enregistrer_entree("Riz", u32::MAX).unwrap_err(),
+        ErreurStock::QuantiteTropGrande
+    );
+    assert_eq!(quantite(&mut d, "Riz"), 3);
+    assert_eq!(compte(&base, "mouvement"), 1);
+}
+
+#[test]
+#[ignore = "demande un serveur MySQL (KORA_TEST_URL)"]
+fn le_stock_peut_atteindre_exactement_u32_max() {
+    let base = BaseJetable::creer();
+    let mut d = depot(&base);
+    d.ajouter_produit("Grain", 0).unwrap();
+    d.enregistrer_entree("Grain", u32::MAX).unwrap();
+    assert_eq!(quantite(&mut d, "Grain"), u32::MAX);
+    assert_eq!(d.enregistrer_sortie("Grain", u32::MAX).unwrap().quantite, 0);
+}
+
+#[test]
+#[ignore = "demande un serveur MySQL (KORA_TEST_URL)"]
+fn renommer_un_produit_jamais_vendu_change_aussi_son_historique() {
+    let base = BaseJetable::creer();
+    let mut d = depot(&base);
+    d.ajouter_produit("Sel", 0).unwrap();
+    d.enregistrer_entree("Sel", 3).unwrap();
+    d.renommer_produit("Sel", "Sel fin").unwrap();
+    assert_eq!(d.instantane().unwrap().produits()[0].nom, "Sel fin");
+    assert_eq!(
+        historique(&mut d),
+        [(Genre::Entree, "Sel fin".to_string(), 3)]
+    );
+    let cles: Vec<String> = base
+        .connexion()
+        .query("SELECT produit_cle FROM mouvement")
+        .unwrap();
+    assert_eq!(cles, ["sel fin"]);
+    // La casse seule change aussi, c'est le même produit.
+    d.renommer_produit("Sel fin", "SEL FIN").unwrap();
+    assert_eq!(d.instantane().unwrap().produits()[0].nom, "SEL FIN");
+    // Et il se retrouve sous son nouveau nom.
+    d.enregistrer_entree("sel fin", 1).unwrap();
+    assert_eq!(quantite(&mut d, "SEL FIN"), 4);
+}
+
+#[test]
+#[ignore = "demande un serveur MySQL (KORA_TEST_URL)"]
+fn renommer_vers_un_nom_pris_ou_invalide_est_refuse() {
+    let base = BaseJetable::creer();
+    let mut d = depot(&base);
+    d.ajouter_produit("Sel", 0).unwrap();
+    d.ajouter_produit("Riz", 0).unwrap();
+    assert_eq!(
+        d.renommer_produit("Sel", " riz ").unwrap_err(),
+        ErreurStock::ProduitExistant("Riz".to_string())
+    );
+    assert!(matches!(
+        d.renommer_produit("Sel", "a;b"),
+        Err(ErreurStock::NomInvalide(_))
+    ));
+    assert_eq!(
+        d.renommer_produit("Inconnu", "Autre").unwrap_err(),
+        ErreurStock::ProduitInconnu("Inconnu".to_string())
+    );
+    let e = d
+        .renommer_produit("Sel", &"é".repeat(191))
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("190"), "{e}");
+    let noms: Vec<String> = d
+        .instantane()
+        .unwrap()
+        .produits()
+        .iter()
+        .map(|p| p.nom.clone())
+        .collect();
+    assert_eq!(noms, ["Riz", "Sel"]);
+}
+
+#[test]
+#[ignore = "demande un serveur MySQL (KORA_TEST_URL)"]
+fn un_produit_vendu_ne_se_renomme_ni_ne_se_supprime() {
+    let base = BaseJetable::creer();
+    let mut d = depot(&base);
+    d.ajouter_produit("Riz", 0).unwrap();
+    d.ajouter_produit("Pain", 0).unwrap();
+    vente_a_la_main(&base, "Riz");
+    assert_eq!(
+        d.renommer_produit("riz", "Riz long").unwrap_err(),
+        ErreurStock::ProduitVendu("Riz".to_string())
+    );
+    assert_eq!(
+        d.supprimer_produit("Riz").unwrap_err(),
+        ErreurStock::ProduitVendu("Riz".to_string())
+    );
+    // Un autre produit, jamais vendu, se renomme et se supprime.
+    d.renommer_produit("Pain", "Baguette").unwrap();
+    d.supprimer_produit("Baguette").unwrap();
+    let noms: Vec<String> = d
+        .instantane()
+        .unwrap()
+        .produits()
+        .iter()
+        .map(|p| p.nom.clone())
+        .collect();
+    assert_eq!(noms, ["Riz"]);
+}
+
+#[test]
+#[ignore = "demande un serveur MySQL (KORA_TEST_URL)"]
+fn supprimer_un_produit_garde_son_historique() {
+    let base = BaseJetable::creer();
+    let mut d = depot(&base);
+    d.ajouter_produit("Sel", 0).unwrap();
+    d.enregistrer_entree("Sel", 3).unwrap();
+    d.supprimer_produit("sel").unwrap();
+    assert!(d.instantane().unwrap().produits().is_empty());
+    assert_eq!(historique(&mut d), [(Genre::Entree, "Sel".to_string(), 3)]);
+    assert_eq!(
+        d.supprimer_produit("Sel").unwrap_err(),
+        ErreurStock::ProduitInconnu("Sel".to_string())
+    );
+}

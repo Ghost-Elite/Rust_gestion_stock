@@ -237,6 +237,47 @@ fn piece_quelconque(tx: &mut Transaction<'_>) -> Result<Option<Piece>, Echec> {
     }
 }
 
+/// Une pièce qui nomme ce produit (clé), si le produit a déjà été vendu : le cœur refuse alors de
+/// le renommer ou de le supprimer.
+fn piece_temoin(tx: &mut Transaction<'_>, cle_du_produit: &str) -> Result<Option<Piece>, Echec> {
+    let une: Option<(String, u64)> = tx.exec_first(
+        "SELECT caisse, numero FROM piece_ligne WHERE nom_cle = ? LIMIT 1",
+        (cle_du_produit,),
+    )?;
+    match une {
+        Some((caisse, numero)) => charger_piece(tx, &caisse, numero, false),
+        None => Ok(None),
+    }
+}
+
+/// Écrit les mouvements d'une opération (ceux du `Stock` partiel : tous sont nouveaux).
+fn ecrire_mouvements(
+    tx: &mut Transaction<'_>,
+    caisse: &str,
+    mouvements: &[Mouvement],
+    piece_numero: Option<u64>,
+) -> Result<(), Echec> {
+    for mouvement in mouvements {
+        let genre = match mouvement.genre {
+            Genre::Entree => "entree",
+            Genre::Sortie => "sortie",
+        };
+        tx.exec_drop(
+            "INSERT INTO mouvement (produit_nom, produit_cle, genre, quantite, caisse, piece_numero) \
+             VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                &mouvement.nom,
+                cle(&mouvement.nom),
+                genre,
+                mouvement.quantite,
+                caisse,
+                piece_numero,
+            ),
+        )?;
+    }
+    Ok(())
+}
+
 // ---- Le dépôt ---------------------------------------------------------------------------------
 
 pub struct DepotMysql {
@@ -277,6 +318,27 @@ impl DepotMysql {
         Ok(DepotMysql {
             config: config.clone(),
             connexion,
+        })
+    }
+
+    /// Une entrée ou une sortie de stock : `appliquer` est la règle du cœur, appliquée au produit
+    /// verrouillé ; on écrit sa nouvelle quantité et le mouvement qu'elle a produit.
+    fn mouvement(
+        &mut self,
+        nom: &str,
+        appliquer: impl Fn(&mut Stock) -> Result<Produit, ErreurStock>,
+    ) -> Result<Produit, ErreurStock> {
+        let cle_du_nom = cle(nom);
+        self.transaction(|tx, caisse| {
+            let produits = charger_produits(tx, std::slice::from_ref(&cle_du_nom))?;
+            let mut stock = Stock::partiel(produits, Reglages::default(), Vec::new());
+            let produit = appliquer(&mut stock)?;
+            ecrire_mouvements(tx, caisse, &stock.historique, None)?;
+            tx.exec_drop(
+                "UPDATE produit SET quantite = ? WHERE nom_cle = ?",
+                (produit.quantite, &cle_du_nom),
+            )?;
+            Ok(produit)
         })
     }
 
@@ -457,20 +519,59 @@ impl Depot for DepotMysql {
         })
     }
 
-    fn enregistrer_entree(&mut self, _nom: &str, _quantite: u32) -> Result<Produit, ErreurStock> {
-        pas_encore_realise()
+    fn enregistrer_entree(&mut self, nom: &str, quantite: u32) -> Result<Produit, ErreurStock> {
+        self.mouvement(nom, |stock| {
+            stock.enregistrer_entree(nom, quantite).cloned()
+        })
     }
 
-    fn enregistrer_sortie(&mut self, _nom: &str, _quantite: u32) -> Result<Produit, ErreurStock> {
-        pas_encore_realise()
+    fn enregistrer_sortie(&mut self, nom: &str, quantite: u32) -> Result<Produit, ErreurStock> {
+        self.mouvement(nom, |stock| {
+            stock.enregistrer_sortie(nom, quantite).cloned()
+        })
     }
 
-    fn renommer_produit(&mut self, _ancien: &str, _nouveau: &str) -> Result<(), ErreurStock> {
-        pas_encore_realise()
+    fn renommer_produit(&mut self, ancien: &str, nouveau: &str) -> Result<(), ErreurStock> {
+        let (cle_ancienne, cle_nouvelle) = (cle(ancien), cle(nouveau));
+        self.transaction(|tx, _| {
+            // L'ancien produit, et l'éventuel produit qui porte déjà le nouveau nom.
+            let produits = charger_produits(tx, &[cle_ancienne.clone(), cle_nouvelle.clone()])?;
+            let temoin = piece_temoin(tx, &cle_ancienne)?;
+            let mut stock =
+                Stock::partiel(produits, Reglages::default(), temoin.into_iter().collect());
+            stock.renommer_produit(ancien, nouveau)?;
+            let renomme = stock
+                .produits
+                .iter()
+                .find(|p| cle(&p.nom) == cle_nouvelle)
+                .expect("le produit renommé est dans le stock partiel");
+            verifier_longueur(&renomme.nom)?;
+            let nom = renomme.nom.clone();
+            tx.exec_drop(
+                "UPDATE produit SET nom = ?, nom_cle = ? WHERE nom_cle = ?",
+                (&nom, &cle_nouvelle, &cle_ancienne),
+            )?;
+            // Le nouveau nom remplace l'ancien dans tout l'historique.
+            tx.exec_drop(
+                "UPDATE mouvement SET produit_nom = ?, produit_cle = ? WHERE produit_cle = ?",
+                (&nom, &cle_nouvelle, &cle_ancienne),
+            )?;
+            Ok(())
+        })
     }
 
-    fn supprimer_produit(&mut self, _nom: &str) -> Result<(), ErreurStock> {
-        pas_encore_realise()
+    fn supprimer_produit(&mut self, nom: &str) -> Result<(), ErreurStock> {
+        let cle_du_nom = cle(nom);
+        self.transaction(|tx, _| {
+            let produits = charger_produits(tx, std::slice::from_ref(&cle_du_nom))?;
+            let temoin = piece_temoin(tx, &cle_du_nom)?;
+            let mut stock =
+                Stock::partiel(produits, Reglages::default(), temoin.into_iter().collect());
+            stock.supprimer_produit(nom)?;
+            // Les mouvements restent : l'historique n'oublie rien.
+            tx.exec_drop("DELETE FROM produit WHERE nom_cle = ?", (&cle_du_nom,))?;
+            Ok(())
+        })
     }
 
     fn encaisser(
