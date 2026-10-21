@@ -1,5 +1,6 @@
 pub mod base;
 pub mod commandes;
+pub mod depot;
 pub mod erreur;
 pub mod horodatage;
 pub(crate) mod journal;
