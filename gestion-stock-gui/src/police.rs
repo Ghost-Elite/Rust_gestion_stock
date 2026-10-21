@@ -68,6 +68,12 @@ pub fn police(graisse: Graisse, taille: f32) -> FontId {
     FontId::new(taille, famille(graisse))
 }
 
+/// La même, sans risque : à utiliser pour tout ce qui se dessine pendant l'image courante (la
+/// famille retombe sur la police normale tant que celles de Plex ne sont pas installées).
+pub fn police_disponible(ctx: &Context, graisse: Graisse, taille: f32) -> FontId {
+    FontId::new(taille, famille_disponible(ctx, graisse))
+}
+
 /// Plex devient la police par défaut ; les polices d'egui restent derrière elle, pour les
 /// caractères qu'elle n'a pas (emoji, symboles).
 pub fn definitions() -> FontDefinitions {
@@ -127,6 +133,27 @@ mod tests {
         }
         // La graisse normale est la famille par défaut.
         assert_eq!(super::famille(Graisse::Normale), FontFamily::Proportional);
+    }
+
+    #[test]
+    fn une_police_sure_ne_plante_pas_avant_l_installation_des_polices() {
+        // Première image d'une vraie fenêtre : les polices de Plex ne sont pas encore installées.
+        let ctx = Context::default();
+        let entree = RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(400.0, 300.0))),
+            ..Default::default()
+        };
+        let _ = ctx.run_ui(entree, |ui| {
+            for graisse in [Graisse::Moyenne, Graisse::SemiGrasse, Graisse::Grasse] {
+                let police = police_disponible(ui.ctx(), graisse, 18.0);
+                let galerie = ui.painter().layout_no_wrap(
+                    "Kora".to_string(),
+                    police,
+                    eframe::egui::Color32::BLACK,
+                );
+                assert!(galerie.size().x > 0.0);
+            }
+        });
     }
 
     #[test]

@@ -3,8 +3,32 @@
 
 use gestion_stock::reglages::Profil;
 
-pub const TITRE_FENETRE: &str = "Gestion de stock";
-pub const SOUS_TITRE: &str = "Suivez vos entrées, vos sorties et vos alertes de stock.";
+pub const TITRE_FENETRE: &str = "Kora Marché — Caisse";
+
+/// Le magasin et le numéro de caisse affichés dans l'en-tête. Constantes à l'étape A ; ce sont des
+/// réglages à l'étape B.
+pub const NOM_MAGASIN: &str = "Kora Marché";
+pub const NUMERO_CAISSE: u32 = 1;
+
+/// `Caisse 01`.
+pub fn libelle_caisse() -> String {
+    format!("Caisse {NUMERO_CAISSE:02}")
+}
+
+/// Le numéro de ticket montré à la personne : numéro de caisse, tiret, numéro du journal
+/// (`01-0186`). Le numéro interne reste celui du journal.
+pub fn numero_de_ticket(numero: u64) -> String {
+    format!("{NUMERO_CAISSE:02}-{numero:04}")
+}
+
+pub const BOUTON_RETOUR_VENTE: &str = "Retour à la vente";
+pub const BOUTON_MENU: &str = "Menu";
+pub const TITRE_MENU: &str = "Menu";
+pub const ECRAN_HISTORIQUE: &str = "Historique";
+pub const ECRAN_STOCK: &str = "Stock";
+pub const ECRAN_REGLAGES: &str = "Réglages";
+pub const BOUTON_FERMER: &str = "Fermer";
+pub const RECHERCHE_TITRE: &str = "Rechercher un article";
 
 pub const CHIFFRE_PRODUITS: &str = "Produits";
 pub const CHIFFRE_ALERTES: &str = "En alerte";
@@ -40,10 +64,6 @@ pub const BOUTON_ANNULER: &str = "Annuler";
 pub const SECTION_HISTORIQUE: &str = "Derniers mouvements";
 pub const AUCUN_MOUVEMENT: &str = "Aucun mouvement enregistré.";
 
-pub const NAVIGATION: &str = "Sections de l'application";
-pub const ONGLET_VENTE: &str = "Vente";
-pub const ONGLET_STOCK: &str = "Stock";
-
 pub const SECTION_PRODUITS_VENTE: &str = "Produits";
 pub const RECHERCHE_VENTE: &str = "Rechercher un produit à vendre";
 pub const AUCUN_PRODUIT_VENDABLE: &str = "Aucun produit ne correspond.";
@@ -69,9 +89,6 @@ pub const BOUTON_NOUVELLE_VENTE: &str = "Nouvelle vente";
 pub const MENTION_NON_CERTIFIE: &str =
     "Ticket non fiscal : ce programme n'est pas une caisse certifiée.";
 pub const LIBELLE_RENDU: &str = "Rendu de monnaie";
-
-pub const ONGLET_VENTES: &str = "Ventes";
-pub const ONGLET_REGLAGES: &str = "Réglages";
 
 pub const SECTION_VENTES: &str = "Journal des ventes";
 pub const AUCUNE_VENTE: &str = "Aucune vente enregistrée.";
@@ -226,4 +243,17 @@ pub fn prix_court(prix: &str) -> String {
 
 pub fn journal_altere(message: &str) -> String {
     format!("{message} {JOURNAL_ALTERE_SUITE}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn le_numero_de_ticket_s_ecrit_caisse_tiret_numero() {
+        assert_eq!(numero_de_ticket(1), "01-0001");
+        assert_eq!(numero_de_ticket(186), "01-0186");
+        assert_eq!(numero_de_ticket(12_345), "01-12345");
+        assert_eq!(libelle_caisse(), "Caisse 01");
+    }
 }

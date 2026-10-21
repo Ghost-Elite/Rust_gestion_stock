@@ -12,7 +12,7 @@ use gestion_stock::horodatage::Horodatage;
 use gestion_stock::vente::Moyen;
 use gestion_stock_gui::etat::Etat;
 use gestion_stock_gui::palette;
-use gestion_stock_gui::ui::{Application, Onglet, dessiner};
+use gestion_stock_gui::ui::{Application, Ecran, dessiner};
 
 /// Une boutique d'exemple : des produits en alerte, d'autres corrects, un peu d'historique.
 fn application_exemple(nom: &str) -> Application {
@@ -53,14 +53,14 @@ fn application_exemple(nom: &str) -> Application {
         assert!(etat.definir_prix(produit, prix, taux));
     }
     let mut app = Application::nouvelle(etat);
-    app.onglet = Onglet::Stock;
+    app.ecran = Ecran::Stock;
     app
 }
 
 /// La vente en cours : un panier de trois lignes, payé en espèces.
 fn vente_en_cours(nom: &str) -> Application {
     let mut app = application_exemple(nom);
-    app.onglet = Onglet::Vente;
+    app.ecran = Ecran::Vente;
     app.panier = vec![
         ("Riz parfumé 5kg".to_string(), 1),
         ("Sucre en poudre 1kg".to_string(), 2),
@@ -75,7 +75,7 @@ fn capturer(nom: &str, taille: Vec2, app: Application) {
     let mut h = Harness::builder()
         .wgpu()
         .with_size(taille)
-        .with_pixels_per_point(1.5)
+        .with_pixels_per_point(1.0)
         .build_ui_state(
             |ui, app: &mut Application| {
                 palette::appliquer(ui.ctx());
@@ -120,7 +120,7 @@ fn apercu_fenetre_etroite() {
 #[ignore = "outil de design : lancer à la main"]
 fn apercu_vente_vide() {
     let mut app = application_exemple("vente-vide");
-    app.onglet = Onglet::Vente;
+    app.ecran = Ecran::Vente;
     capturer("vente_vide", Vec2::new(1040.0, 700.0), app);
 }
 
@@ -162,7 +162,7 @@ fn apercu_ventes() {
     assert!(etat.encaisser(&app.panier, Moyen::Especes, "20"));
     assert!(etat.encaisser(&[("Lait concentré".to_string(), 3)], Moyen::Carte, ""));
     app.panier.clear();
-    app.onglet = Onglet::Ventes;
+    app.ecran = Ecran::Historique;
     app.annulation_en_attente = Some(1);
     capturer("ventes", Vec2::new(1100.0, 720.0), app);
 }
@@ -171,7 +171,7 @@ fn apercu_ventes() {
 #[ignore = "outil de design : lancer à la main"]
 fn apercu_reglages() {
     let mut app = application_exemple("reglages");
-    app.onglet = Onglet::Reglages;
+    app.ecran = Ecran::Reglages;
     capturer("reglages", Vec2::new(1100.0, 720.0), app);
 }
 

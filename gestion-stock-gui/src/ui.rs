@@ -10,14 +10,14 @@
 
 use crate::etat::{Etat, LignePiece, LigneProduit, Reglement, Resume, Retour, chemin_complet};
 use crate::palette::{
-    ACCENT, ACCENT_DOUX, ACCENT_TEXTE, ALERTE_FOND, ALERTE_TEXTE, AVERTISSEMENT_TEXTE, FILET,
-    FOCUS, FOND, SUCCES_FOND, SUCCES_TEXTE, SURFACE, TEXTE, TEXTE_DISCRET, couleur,
+    ACCENT, ACCENT_DOUX, ALERTE_FOND, ALERTE_TEXTE, AVERTISSEMENT_TEXTE, ENTETE_FOND, ENTETE_TEXTE,
+    FILET, FOCUS, FOND, SUCCES_FOND, SUCCES_TEXTE, SURFACE, TEXTE, TEXTE_DISCRET, couleur,
 };
 use crate::police::{Graisse, famille_disponible};
 use crate::textes::*;
 use eframe::egui::{
-    self, Align, Button, CentralPanel, CornerRadius, CursorIcon, FontId, Frame, Id, Layout, Margin,
-    Panel, Response, RichText, ScrollArea, Sense, Stroke, StrokeKind, Ui, Vec2, WidgetInfo,
+    self, Align, Align2, Button, CentralPanel, CornerRadius, CursorIcon, FontId, Frame, Id, Layout,
+    Margin, Panel, Response, RichText, ScrollArea, Sense, Stroke, StrokeKind, Ui, Vec2, WidgetInfo,
     WidgetType,
 };
 use gestion_stock::erreur::ErreurStock;
@@ -26,8 +26,10 @@ use gestion_stock::reglages::Profil;
 use gestion_stock::vente::Moyen;
 use gestion_stock::vente::{Devis, GenrePiece, GroupeTaux};
 use std::path::Path;
+use std::time::Duration;
 
 mod composants;
+mod entete;
 #[cfg(test)]
 mod essais;
 
@@ -35,23 +37,48 @@ use composants::*;
 
 /// La taille de la fenêtre au lancement et sa taille minimale, en points. Les tests les utilisent
 /// aussi : ils vérifient que l'essentiel est à l'écran à la taille que voit vraiment la personne.
-pub const TAILLE_FENETRE: [f32; 2] = [1100.0, 720.0];
+pub const TAILLE_FENETRE: [f32; 2] = [1366.0, 768.0];
 pub const TAILLE_MINIMALE: [f32; 2] = [640.0, 420.0];
 
 /// En dessous de cette largeur (en points, donc aussi quand le texte est agrandi), on passe
 /// en une seule colonne : les commandes se placent sous la liste au lieu d'être à côté.
 const LARGEUR_DEUX_COLONNES: f32 = 800.0;
 
-/// Les sections de l'application.
+/// Les écrans de l'application. On passe de l'un à l'autre par le Menu et par l'en-tête : il n'y
+/// a plus d'onglets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum Onglet {
+pub enum Ecran {
     /// L'écran de caisse : c'est celui que l'on ouvre en premier, la vente est le geste courant.
     #[default]
     Vente,
+    /// La recherche d'un article à mettre au ticket.
+    Recherche,
+    /// Les tickets, où l'on rembourse une vente.
+    Historique,
     Stock,
-    /// Le journal des ventes, où l'on annule une vente.
-    Ventes,
     Reglages,
+}
+
+/// Une fenêtre modale ouverte par-dessus l'écran (les autres variantes arrivent avec leurs
+/// écrans).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Modale {
+    Menu,
+}
+
+/// Un message de quelques secondes, en bas de l'écran. `depuis` est l'heure d'egui du premier
+/// affichage (posée à ce moment-là).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Toast {
+    pub texte: String,
+    pub depuis: Option<f64>,
+}
+
+/// Combien de secondes un message éphémère reste affiché.
+const DUREE_MESSAGE: f64 = 3.0;
+
+fn toast_visible(depuis: f64, maintenant: f64) -> bool {
+    maintenant - depuis < DUREE_MESSAGE
 }
 
 /// Les réglages en cours de modification : ils ne comptent qu'une fois enregistrés.
@@ -64,7 +91,11 @@ pub struct BrouillonReglages {
 
 #[derive(Default)]
 pub struct Application {
-    pub onglet: Onglet,
+    pub ecran: Ecran,
+    /// La fenêtre modale ouverte, s'il y en a une.
+    pub modale: Option<Modale>,
+    /// Le message éphémère affiché en bas de l'écran.
+    pub toast: Option<Toast>,
     /// Le panier en cours : (nom du produit, quantité).
     pub panier: Vec<(String, u32)>,
     pub moyen: Moyen,
@@ -121,6 +152,14 @@ impl Application {
         self.panier.retain(|(_, quantite)| *quantite > 0);
     }
 
+    /// Affiche un message de quelques secondes en bas de l'écran.
+    pub fn message(&mut self, texte: impl Into<String>) {
+        self.toast = Some(Toast {
+            texte: texte.into(),
+            depuis: None,
+        });
+    }
+
     pub fn en_erreur(message: String, chemin: &Path) -> Application {
         Application {
             erreur_ouverture: Some(message),
@@ -144,26 +183,83 @@ pub fn dessiner(ui: &mut Ui, app: &mut Application) {
         return;
     }
     abandonner_la_selection_perimee(app);
+    succes_vers_message(app);
     Panel::top(Id::new("entete"))
         .frame(
             Frame::new()
-                .fill(couleur(SURFACE))
-                .inner_margin(Margin::symmetric(24, 12)),
+                .fill(couleur(ENTETE_FOND))
+                .inner_margin(Margin::symmetric(20, 0)),
         )
-        .show(ui, |ui| entete(ui, app));
-    Panel::bottom(Id::new("pied_de_page"))
-        .frame(
-            Frame::new()
-                .fill(couleur(SURFACE))
-                .inner_margin(Margin::symmetric(24, 10)),
-        )
-        .show(ui, |ui| pied_de_page(ui, app));
-    match app.onglet {
-        Onglet::Vente => ecran_vente(ui, app),
-        Onglet::Stock => ecran_stock(ui, app),
-        Onglet::Ventes => page(ui, 900.0, |ui| ecran_ventes(ui, app)),
-        Onglet::Reglages => page(ui, 640.0, |ui| ecran_reglages(ui, app)),
+        .exact_size(56.0)
+        .show_separator_line(false)
+        .show(ui, |ui| entete::entete(ui, app));
+    // Une erreur reste affichée sous l'en-tête jusqu'à la prochaine action réussie.
+    if let Some(Retour::Erreur(message)) = app.etat.as_ref().and_then(|etat| etat.retour.clone()) {
+        Panel::top(Id::new("bandeau_erreur"))
+            .frame(
+                Frame::new()
+                    .fill(couleur(FOND))
+                    .inner_margin(Margin::symmetric(16, 8)),
+            )
+            .show_separator_line(false)
+            .show(ui, |ui| {
+                bandeau_alerte(ui, &format!("Erreur : {message}"));
+            });
     }
+    match app.ecran {
+        Ecran::Vente => ecran_vente(ui, app),
+        Ecran::Recherche => page(ui, 900.0, |ui| {
+            carte(ui, |ui| titre_de_carte(ui, RECHERCHE_TITRE));
+        }),
+        Ecran::Historique => page(ui, 900.0, |ui| ecran_ventes(ui, app)),
+        Ecran::Stock => ecran_stock(ui, app),
+        Ecran::Reglages => page(ui, 640.0, |ui| ecran_reglages(ui, app)),
+    }
+    if app.modale == Some(Modale::Menu) {
+        entete::fenetre_menu(ui.ctx(), app);
+    }
+    afficher_message(ui.ctx(), app);
+}
+
+/// Un message de succès de l'état devient un message éphémère : il n'y a plus de pied de page.
+fn succes_vers_message(app: &mut Application) {
+    let Some(etat) = app.etat.as_mut() else {
+        return;
+    };
+    if let Some(Retour::Succes(texte)) = etat.retour.take_if(|r| matches!(r, Retour::Succes(_))) {
+        app.message(texte);
+    }
+}
+
+/// La pastille sombre du message éphémère, centrée au-dessus de la barre de fonctions.
+fn afficher_message(ctx: &egui::Context, app: &mut Application) {
+    let maintenant = ctx.input(|i| i.time);
+    let Some(toast) = app.toast.as_mut() else {
+        return;
+    };
+    let depuis = *toast.depuis.get_or_insert(maintenant);
+    if !toast_visible(depuis, maintenant) {
+        app.toast = None;
+        return;
+    }
+    ctx.request_repaint_after(Duration::from_secs_f64(
+        DUREE_MESSAGE - (maintenant - depuis),
+    ));
+    let texte = toast.texte.clone();
+    egui::Area::new(Id::new("message_ephemere"))
+        .anchor(Align2::CENTER_BOTTOM, Vec2::new(0.0, -104.0))
+        .order(egui::Order::Tooltip)
+        .fade_in(false)
+        .interactable(false)
+        .show(ctx, |ui| {
+            Frame::new()
+                .fill(couleur(TEXTE))
+                .corner_radius(CornerRadius::same(10))
+                .inner_margin(Margin::symmetric(18, 12))
+                .show(ui, |ui| {
+                    ui.label(RichText::new(texte).size(15.0).color(couleur(ENTETE_TEXTE)));
+                });
+        });
 }
 
 /// La page d'un écran « de lecture » (Ventes, Réglages) : une colonne centrée, qui défile.
@@ -239,81 +335,6 @@ fn abandonner_la_selection_perimee(app: &mut Application) {
         app.selection = None;
         app.confirmer_suppression = false;
     }
-}
-
-// ---- Les zones de la fenêtre ------------------------------------------------------------------
-
-/// La largeur d'un onglet : la même pour tous, pour les aligner à droite sans surprise.
-const LARGEUR_ONGLET: f32 = 104.0;
-
-/// Largeur à partir de laquelle les onglets tiennent à droite du titre, sur la même ligne.
-const LARGEUR_ENTETE_EN_LIGNE: f32 = 980.0;
-
-fn entete(ui: &mut Ui, app: &mut Application) {
-    let large = ui.available_width() >= LARGEUR_ENTETE_EN_LIGNE;
-    ui.horizontal(|ui| {
-        logo(ui);
-        ui.vertical(|ui| {
-            ui.heading(TITRE_FENETRE);
-            discret(ui, SOUS_TITRE);
-        });
-        if large {
-            // Les onglets à droite, sur la ligne du titre : de la hauteur gagnée pour la caisse.
-            let place = ONGLETS.len() as f32 * (LARGEUR_ONGLET + ui.spacing().item_spacing.x);
-            ui.add_space((ui.available_width() - place).max(0.0));
-            onglets(ui, app);
-        }
-    });
-    if !large {
-        ui.add_space(6.0);
-        ui.horizontal_wrapped(|ui| onglets(ui, app));
-    }
-}
-
-const ONGLETS: [(Onglet, &str); 4] = [
-    (Onglet::Vente, ONGLET_VENTE),
-    (Onglet::Stock, ONGLET_STOCK),
-    (Onglet::Ventes, ONGLET_VENTES),
-    (Onglet::Reglages, ONGLET_REGLAGES),
-];
-
-/// Les sections de l'application. Chaque onglet est un bouton dont l'état « sélectionné » est
-/// annoncé par les lecteurs d'écran ; la couleur n'est qu'un renfort.
-fn onglets(ui: &mut Ui, app: &mut Application) {
-    for (onglet, texte) in ONGLETS {
-        if bouton_choix(ui, texte, app.onglet == onglet, LARGEUR_ONGLET).clicked() {
-            app.onglet = onglet;
-        }
-    }
-}
-
-/// Un petit logo décoratif : un carré d'accent avec trois barres de stock. Il n'a pas de nom
-/// pour les lecteurs d'écran : il n'apporte aucune information.
-fn logo(ui: &mut Ui) {
-    let (rect, _) = ui.allocate_exact_size(Vec2::splat(46.0), Sense::hover());
-    let peintre = ui.painter();
-    peintre.rect_filled(rect, CornerRadius::same(13), couleur(ACCENT));
-    for (i, hauteur) in [0.34, 0.54, 0.74].into_iter().enumerate() {
-        let x = rect.left() + 11.0 + i as f32 * 8.5;
-        let h = rect.height() * hauteur;
-        let barre = egui::Rect::from_min_max(
-            egui::pos2(x, rect.bottom() - 10.0 - h),
-            egui::pos2(x + 5.5, rect.bottom() - 10.0),
-        );
-        peintre.rect_filled(barre, CornerRadius::same(3), couleur(ACCENT_TEXTE));
-    }
-}
-
-fn pied_de_page(ui: &mut Ui, app: &Application) {
-    let Some(etat) = &app.etat else { return };
-    match &etat.retour {
-        Some(Retour::Succes(message)) => {
-            ui.label(message.as_str());
-        }
-        Some(Retour::Erreur(message)) => bandeau_alerte(ui, &format!("Erreur : {message}")),
-        None => {}
-    }
-    discret(ui, &pied_de_page_donnees(&chemin_complet(etat.chemin())));
 }
 
 fn contenu_liste(ui: &mut Ui, app: &mut Application) {
@@ -1476,10 +1497,7 @@ mod tests {
     use crate::palette::{self, rapport_contraste};
     use eframe::egui::accesskit::Role;
     use eframe::egui::{Pos2, Rect, Vec2};
-    use egui_kittest::{
-        Harness,
-        kittest::{NodeT, Queryable},
-    };
+    use egui_kittest::{Harness, kittest::Queryable};
     use gestion_stock::monnaie::Devise;
     use gestion_stock::reglages::Profil;
     use std::path::Path;
@@ -1492,7 +1510,7 @@ mod tests {
         assert!(etat.ajouter("Sucre", "0"));
         assert!(etat.entree("Sucre", "10"));
         let mut app = Application::nouvelle(etat);
-        app.onglet = Onglet::Stock; // l'écran testé ici est celui du stock
+        app.ecran = Ecran::Stock; // l'écran testé ici est celui du stock
         app
     }
 
@@ -1633,8 +1651,13 @@ mod tests {
         h.run();
         let etat = h.state().etat.as_ref().unwrap();
         assert_eq!(etat.lignes("sucre", false)[0].quantite, 8);
+        // Le message de succès (devenu un message éphémère) n'est pas recouvert par une erreur.
         assert!(
-            matches!(etat.retour, Some(Retour::Succes(_))),
+            h.state().toast.is_some(),
+            "le message de succès est affiché"
+        );
+        assert!(
+            !matches!(etat.retour, Some(Retour::Erreur(_))),
             "{:?}",
             etat.retour
         );
@@ -1695,7 +1718,7 @@ mod tests {
             let mut etat = Etat::ouvrir(chemin_temp("visible")).unwrap();
             assert!(etat.ajouter(produit, "5")); // stock 0 <= seuil 5 : en alerte
             let mut app = Application::nouvelle(etat);
-            app.onglet = Onglet::Stock;
+            app.ecran = Ecran::Stock;
             let ecran = Rect::from_min_size(Pos2::ZERO, taille / zoom);
             let textes = textes_peints(&mut app, taille, zoom);
             let alerte = textes
@@ -1801,36 +1824,124 @@ mod tests {
         ajouter_au_panier(nom, prix)
     }
 
+    // ---- Le cadre : en-tête, Menu, messages --------------------------------------------------
+
     #[test]
-    fn l_application_s_ouvre_sur_la_vente() {
-        let app = app_vendeuse("ouverture");
-        assert_eq!(app.onglet, Onglet::Vente);
+    fn l_en_tete_montre_le_magasin_la_caisse_et_l_heure() {
+        let h = harness_vente(app_vendeuse("entete"), FENETRE);
+        h.get_by_label(NOM_MAGASIN);
+        h.get_by_label(&libelle_caisse());
+        h.get_by_label("23:13"); // horloge fixe : 14/11/2023 23:13 heure locale
     }
 
     #[test]
-    fn les_onglets_sont_annonces_avec_leur_nom_et_leur_role() {
-        let mut h = harness_vente(app_vendeuse("onglets"), FENETRE);
-        let selectionne = |h: &Harness<'static, Application>, nom: &str| {
-            h.get_by_role_and_label(Role::Button, nom)
-                .accesskit_node()
-                .toggled()
-        };
-        // Le choix est dit par l'état « sélectionné » et pas seulement par la couleur.
-        assert_eq!(
-            selectionne(&h, ONGLET_VENTE),
-            Some(eframe::egui::accesskit::Toggled::True)
-        );
-        assert_eq!(
-            selectionne(&h, ONGLET_STOCK),
-            Some(eframe::egui::accesskit::Toggled::False)
-        );
-        cliquer(&mut h, ONGLET_STOCK);
-        assert_eq!(h.state().onglet, Onglet::Stock);
-        h.get_by_role_and_label(Role::TextInput, RECHERCHE);
-        assert!(h.query_by_label(SECTION_PANIER).is_none());
-        cliquer(&mut h, ONGLET_VENTE);
-        assert_eq!(h.state().onglet, Onglet::Vente);
-        h.get_by_label(SECTION_PANIER);
+    fn le_menu_mene_aux_ecrans_et_le_retour_ramene_a_la_vente() {
+        let mut h = harness_vente(app_vendeuse("menu"), FENETRE);
+        cliquer(&mut h, BOUTON_MENU); // bouton TEMPORAIRE de l'en-tête de vente (tâche 6)
+        assert_eq!(h.state().modale, Some(Modale::Menu));
+        for nom in [ECRAN_HISTORIQUE, ECRAN_STOCK, ECRAN_REGLAGES, BOUTON_FERMER] {
+            h.get_by_role_and_label(Role::Button, nom);
+        }
+        cliquer(&mut h, ECRAN_STOCK);
+        assert_eq!(h.state().ecran, Ecran::Stock);
+        assert!(h.state().modale.is_none());
+        cliquer(&mut h, BOUTON_RETOUR_VENTE);
+        assert_eq!(h.state().ecran, Ecran::Vente);
+        // « Fermer » referme le menu sans changer d'écran.
+        cliquer(&mut h, BOUTON_MENU);
+        cliquer(&mut h, BOUTON_FERMER);
+        assert!(h.state().modale.is_none());
+        assert_eq!(h.state().ecran, Ecran::Vente);
+    }
+
+    #[test]
+    fn chaque_ecran_secondaire_a_un_retour_a_la_vente() {
+        for ecran in [
+            Ecran::Stock,
+            Ecran::Reglages,
+            Ecran::Historique,
+            Ecran::Recherche,
+        ] {
+            let mut app = app_vendeuse("retour");
+            app.ecran = ecran;
+            let mut h = harness_vente(app, FENETRE);
+            cliquer(&mut h, BOUTON_RETOUR_VENTE);
+            assert_eq!(h.state().ecran, Ecran::Vente, "depuis {ecran:?}");
+        }
+    }
+
+    #[test]
+    fn la_fenetre_menu_est_un_dialogue_nomme_et_montre_le_fichier_de_donnees() {
+        let mut app = app_vendeuse("dialogue");
+        app.modale = Some(Modale::Menu);
+        let h = harness_vente(app, FENETRE);
+        h.get_by_role_and_label(Role::Dialog, TITRE_MENU);
+        h.get_by_label_contains("Données : ");
+    }
+
+    #[test]
+    fn un_succes_devient_un_message_ephemere_et_une_erreur_un_bandeau() {
+        let mut h = harness_vente(app_avec_produits("messages"), FENETRE);
+        h.get_by_label("Riz 5kg").click();
+        h.run();
+        saisir(&mut h, CHAMP_QUANTITE, "2");
+        cliquer(&mut h, BOUTON_ENTREE);
+        let texte = h
+            .state()
+            .toast
+            .as_ref()
+            .expect("un message éphémère")
+            .texte
+            .clone();
+        h.get_by_label(&texte);
+        assert!(h.state().etat.as_ref().unwrap().retour.is_none());
+
+        // Une erreur reste affichée, en bandeau, image après image.
+        saisir(&mut h, CHAMP_QUANTITE, "50");
+        cliquer(&mut h, BOUTON_SORTIE);
+        h.get_by_label_contains("Erreur :");
+        h.run();
+        h.get_by_label_contains("Erreur :");
+        // Une action réussie la remplace par un message de succès.
+        saisir(&mut h, CHAMP_QUANTITE, "1");
+        cliquer(&mut h, BOUTON_ENTREE);
+        assert!(h.query_by_label_contains("Erreur :").is_none());
+    }
+
+    #[test]
+    fn un_message_ephemere_s_efface_apres_trois_secondes() {
+        assert!(toast_visible(10.0, 10.0));
+        assert!(toast_visible(10.0, 12.9));
+        assert!(!toast_visible(10.0, 13.0));
+    }
+
+    #[test]
+    fn tous_les_textes_peints_de_l_en_tete_et_du_menu_atteignent_4_5() {
+        let mut app = app_vendeuse("contraste-entete");
+        let textes = textes_peints(&mut app, FENETRE, 1.0);
+        for attendu in [NOM_MAGASIN, "Caisse 01", "23:13", BOUTON_MENU] {
+            assert!(
+                textes.iter().any(|t| t.texte == attendu),
+                "« {attendu} » n'est pas peint"
+            );
+        }
+        verifier_contrastes(&textes, "en-tête");
+        app.modale = Some(Modale::Menu);
+        let textes = textes_peints(&mut app, FENETRE, 1.0);
+        assert!(textes.iter().any(|t| t.texte == TITRE_MENU));
+        verifier_contrastes(&textes, "menu");
+        // Un message éphémère : texte blanc sur fond sombre.
+        app.modale = None;
+        app.message("Vente annulée");
+        let textes = textes_peints(&mut app, FENETRE, 1.0);
+        assert!(textes.iter().any(|t| t.texte == "Vente annulée"));
+        verifier_contrastes(&textes, "message");
+    }
+
+    #[test]
+    fn l_application_s_ouvre_sur_la_vente() {
+        let app = app_vendeuse("ouverture");
+        assert_eq!(app.ecran, Ecran::Vente);
     }
 
     #[test]
@@ -2206,36 +2317,6 @@ mod tests {
     // ---- Ventes, réglages, prix ---------------------------------------------------------------
 
     #[test]
-    fn les_quatre_onglets_s_affichent_et_se_selectionnent() {
-        let mut h = harness_vente(app_vendeuse("quatre-onglets"), FENETRE);
-        for nom in [ONGLET_VENTE, ONGLET_STOCK, ONGLET_VENTES, ONGLET_REGLAGES] {
-            h.get_by_role_and_label(Role::Button, nom);
-        }
-        cliquer(&mut h, ONGLET_VENTES);
-        assert_eq!(h.state().onglet, Onglet::Ventes);
-        assert_eq!(est_selectionne(&h, ONGLET_VENTES), Some(true));
-        assert_eq!(est_selectionne(&h, ONGLET_VENTE), Some(false));
-        h.get_by_label(SECTION_VENTES);
-        cliquer(&mut h, ONGLET_REGLAGES);
-        assert_eq!(h.state().onglet, Onglet::Reglages);
-        h.get_by_label(SECTION_REGLAGES);
-    }
-
-    #[test]
-    fn les_quatre_onglets_tiennent_dans_une_fenetre_etroite() {
-        let taille = Vec2::new(TAILLE_MINIMALE[0], 600.0);
-        let h = harness_vente(app_vendeuse("onglets-etroits"), taille);
-        let ecran = Rect::from_min_size(Pos2::ZERO, taille);
-        for nom in [ONGLET_VENTE, ONGLET_STOCK, ONGLET_VENTES, ONGLET_REGLAGES] {
-            let rect = h.get_by_role_and_label(Role::Button, nom).rect();
-            assert!(
-                ecran.contains_rect(rect),
-                "« {nom} » : {rect:?} hors de {ecran:?}"
-            );
-        }
-    }
-
-    #[test]
     fn la_liste_des_ventes_montre_les_pieces_et_permet_d_annuler_avec_confirmation() {
         let mut h = harness_vente(app_avec_ventes("liste-ventes"), FENETRE);
         let (vente1, vente2) = (titre_de_piece(1, "Vente"), titre_de_piece(2, "Vente"));
@@ -2274,14 +2355,14 @@ mod tests {
         }
         h.get_by_role_and_label(Role::Button, &annuler_la_vente(2));
         // L'annulation ne laisse pas un ticket de vente sur l'écran de vente.
-        cliquer(&mut h, ONGLET_VENTE);
+        cliquer(&mut h, BOUTON_RETOUR_VENTE);
         h.get_by_label(PANIER_VIDE);
     }
 
     #[test]
     fn sans_vente_la_liste_le_dit() {
         let mut app = app_vendeuse("aucune-vente");
-        app.onglet = Onglet::Ventes;
+        app.ecran = Ecran::Historique;
         let h = harness_vente(app, FENETRE);
         h.get_by_label(AUCUNE_VENTE);
     }
@@ -2289,14 +2370,14 @@ mod tests {
     #[test]
     fn un_journal_altere_affiche_un_bandeau_et_grise_encaisser_et_annuler() {
         let mut app = app_journal_altere("altere-ui");
-        app.onglet = Onglet::Ventes;
+        app.ecran = Ecran::Historique;
         let mut h = harness_vente(app, FENETRE);
         h.get_by_label_contains("Le journal de caisse a été modifié");
         h.get_by_label_contains("Les ventes et les annulations sont bloquées");
         assert!(est_grise(&h, &annuler_la_vente(1)));
 
         // Même constat sur l'écran de vente : on peut remplir un panier, pas encaisser.
-        cliquer(&mut h, ONGLET_VENTE);
+        cliquer(&mut h, BOUTON_RETOUR_VENTE);
         cliquer(&mut h, &tuile("Savon", "2,50\u{a0}€"));
         cliquer(&mut h, MOYEN_CARTE);
         h.get_by_label_contains("Le journal de caisse a été modifié");
@@ -2312,7 +2393,7 @@ mod tests {
         let chemin = chemin_temp("reglages-ui");
         let etat = Etat::ouvrir(chemin.clone()).unwrap().avec_horloge(|| FIXE);
         let mut app = Application::nouvelle(etat);
-        app.onglet = Onglet::Reglages;
+        app.ecran = Ecran::Reglages;
         let mut h = harness_vente(app, FENETRE);
         // Les réglages enregistrés sont montrés d'abord (Europe, euro, 20 %).
         assert_eq!(est_selectionne(&h, PROFIL_EUROPE), Some(true));
@@ -2347,7 +2428,7 @@ mod tests {
             assert!(etat.ajouter_avec_prix("Pain", "0", "10", ""));
             assert!(etat.entree("Pain", "5"));
         }
-        cliquer(&mut h, ONGLET_VENTE);
+        cliquer(&mut h, BOUTON_RETOUR_VENTE);
         cliquer(&mut h, &tuile("Pain", "$10.00"));
         for ligne in [
             "Sous-total : $10.00",
@@ -2368,7 +2449,7 @@ mod tests {
     #[test]
     fn un_taux_illisible_est_refuse_et_garde_la_saisie() {
         let mut app = app_vendeuse("taux-illisible");
-        app.onglet = Onglet::Reglages;
+        app.ecran = Ecran::Reglages;
         let mut h = harness_vente(app, FENETRE);
         cliquer(&mut h, DEVISE_GBP);
         h.state_mut().reglages_saisis.as_mut().unwrap().taux = "beaucoup".into();
@@ -2388,7 +2469,7 @@ mod tests {
     #[test]
     fn apres_une_vente_la_devise_et_le_profil_sont_figes_mais_pas_le_taux() {
         let mut app = app_avec_ventes("reglages-figes");
-        app.onglet = Onglet::Reglages;
+        app.ecran = Ecran::Reglages;
         let mut h = harness_vente(app, FENETRE);
         h.get_by_label(REGLAGES_VERROUILLES);
         for nom in [
@@ -2455,7 +2536,7 @@ mod tests {
         h.run();
         h.get_by_label_contains("Prix de « Riz 5kg » : 2,50\u{a0}€");
         // Le riz est maintenant vendable : sa tuile n'est plus grisée.
-        cliquer(&mut h, ONGLET_VENTE);
+        cliquer(&mut h, BOUTON_RETOUR_VENTE);
         assert!(!est_grise(&h, &tuile("Riz 5kg", "2,50\u{a0}€")));
         assert!(est_grise(&h, &produit_non_vendable("Sucre", PRIX_MANQUANT)));
     }
@@ -2483,7 +2564,7 @@ mod tests {
     #[test]
     fn choisir_un_produit_preremplit_son_prix_et_son_taux() {
         let mut app = app_vendeuse("preremplir");
-        app.onglet = Onglet::Stock;
+        app.ecran = Ecran::Stock;
         let mut h = harness(app);
         h.get_by_label("Pain").click();
         h.run();
@@ -2512,7 +2593,7 @@ mod tests {
     #[test]
     fn renommer_ou_supprimer_un_produit_vendu_affiche_le_message_de_la_bibliotheque() {
         let mut app = app_avec_ventes("produit-vendu");
-        app.onglet = Onglet::Stock;
+        app.ecran = Ecran::Stock;
         let mut h = harness(app);
         h.get_by_label("Pain").click();
         h.run();
@@ -2535,7 +2616,7 @@ mod tests {
     #[test]
     fn les_noms_de_champs_et_boutons_des_nouveaux_ecrans_ont_un_role_et_un_nom() {
         let mut app = app_vendeuse("roles-reglages");
-        app.onglet = Onglet::Reglages;
+        app.ecran = Ecran::Reglages;
         let h = harness_vente(app, FENETRE);
         h.get_by_role_and_label(Role::TextInput, CHAMP_TAUX_DEFAUT);
         for nom in [
@@ -2551,7 +2632,7 @@ mod tests {
         }
 
         let mut app = app_vendeuse("roles-stock");
-        app.onglet = Onglet::Stock;
+        app.ecran = Ecran::Stock;
         app.selection = Some("Pain".into());
         let h = harness_vente(app, Vec2::new(1100.0, 1400.0));
         for nom in [CHAMP_PRIX_AJOUT, CHAMP_TAUX_AJOUT, CHAMP_PRIX, CHAMP_TAUX] {
@@ -2563,7 +2644,7 @@ mod tests {
     #[test]
     fn le_bouton_enregistrer_les_reglages_est_a_l_ecran_a_la_taille_par_defaut() {
         let mut app = app_vendeuse("reglages-ecran");
-        app.onglet = Onglet::Reglages;
+        app.ecran = Ecran::Reglages;
         let h = harness_vente(app, FENETRE);
         let ecran = Rect::from_min_size(Pos2::ZERO, FENETRE);
         for nom in [BOUTON_ENREGISTRER_REGLAGES, DEVISE_XOF, PROFIL_ETATS_UNIS] {
@@ -2599,7 +2680,7 @@ mod tests {
         verifier_contrastes(&textes, "ventes, confirmation");
 
         let mut app = app_journal_altere("contraste-altere");
-        app.onglet = Onglet::Ventes;
+        app.ecran = Ecran::Historique;
         let textes = textes_peints(&mut app, FENETRE, 1.0);
         assert!(
             textes
@@ -2609,7 +2690,7 @@ mod tests {
         verifier_contrastes(&sauf(textes, &[BOUTON_ANNULER_VENTE]), "journal altéré");
 
         let mut app = app_vendeuse("contraste-reglages");
-        app.onglet = Onglet::Reglages;
+        app.ecran = Ecran::Reglages;
         let textes = textes_peints(&mut app, FENETRE, 1.0);
         assert!(
             textes
@@ -2619,7 +2700,7 @@ mod tests {
         verifier_contrastes(&textes, "réglages");
 
         let mut app = app_avec_ventes("contraste-reglages-figes");
-        app.onglet = Onglet::Reglages;
+        app.ecran = Ecran::Reglages;
         let textes = textes_peints(&mut app, FENETRE, 1.0);
         assert!(textes.iter().any(|t| t.texte == REGLAGES_VERROUILLES));
         let grises = [
@@ -2634,7 +2715,7 @@ mod tests {
 
         // L'onglet Stock avec ses nouveaux champs de prix, produit sélectionné.
         let mut app = app_vendeuse("contraste-stock-prix");
-        app.onglet = Onglet::Stock;
+        app.ecran = Ecran::Stock;
         app.selection = Some("Pain".into());
         app.saisie_prix_produit = "1,20".into();
         app.saisie_taux_produit = "5,5".into();

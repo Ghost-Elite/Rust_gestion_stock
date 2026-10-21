@@ -219,6 +219,12 @@ impl Etat {
         &self.chemin
     }
 
+    /// L'heure locale, `23:13`, pour l'en-tête.
+    pub fn heure_locale(&self) -> String {
+        let maintenant = (self.horloge.0)().local();
+        format!("{:02}:{:02}", maintenant.heure, maintenant.minute)
+    }
+
     /// Produits triés par nom ; `recherche` : texte contenu dans le nom, sans casse
     /// ni espaces autour.
     pub fn lignes(&self, recherche: &str, alertes_seulement: bool) -> Vec<LigneProduit> {
@@ -1296,5 +1302,22 @@ mod tests {
         assert!(!e.reglages_verrouilles());
         assert!(e.encaisser(&panier(&[("Pain", 1)]), Moyen::Carte, ""));
         assert!(e.reglages_verrouilles());
+    }
+
+    #[test]
+    fn l_heure_locale_s_ecrit_hh_mm() {
+        let e = Etat::ouvrir(chemin_temp("heure"))
+            .unwrap()
+            .avec_horloge(|| Horodatage {
+                utc: 1_700_000_000,
+                decalage_minutes: 60,
+            });
+        assert_eq!(e.heure_locale(), "23:13");
+        let e = e.avec_horloge(|| Horodatage {
+            utc: 1_700_000_000 + 7 * 3600 + 120,
+            decalage_minutes: 0,
+        });
+        // 2023-11-14 22:13 UTC + 7 h 02 = 2023-11-15 05:15 UTC, avec un zéro devant l'heure.
+        assert_eq!(e.heure_locale(), "05:15");
     }
 }

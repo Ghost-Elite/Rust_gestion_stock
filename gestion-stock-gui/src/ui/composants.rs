@@ -3,12 +3,13 @@
 
 use crate::palette::{
     ACCENT, ACCENT_TEXTE, ALERTE_FOND, ALERTE_TEXTE, BORDURE_BOUTON, DANGER, FILET, FOCUS, SURFACE,
-    TEXTE_DISCRET, couleur,
+    TEXTE_DISCRET, VOILE, couleur,
 };
 use crate::police::{Graisse, famille_disponible};
+use eframe::egui::accesskit::Role;
 use eframe::egui::{
-    self, Button, CornerRadius, FontId, Frame, Margin, Response, RichText, Stroke, StrokeKind,
-    TextEdit, Ui, Vec2, WidgetInfo, WidgetType,
+    self, Button, Context, CornerRadius, FontId, Frame, Id, Margin, Response, RichText, Stroke,
+    StrokeKind, TextEdit, Ui, Vec2, WidgetInfo, WidgetType,
 };
 
 // ---- Petits éléments de style -----------------------------------------------------------------
@@ -135,6 +136,17 @@ pub(crate) enum Style {
 /// une fois, puis afficherait « Erreur : quantité manquante » par-dessus le succès, et la
 /// personne croirait que ça a échoué et recommencerait.
 pub(crate) fn bouton(ui: &mut Ui, texte: &str, style: Style, actif: bool) -> Response {
+    bouton_large(ui, texte, style, actif, Vec2::new(0.0, 38.0))
+}
+
+/// Le même bouton avec une taille minimale au choix (les boutons des fenêtres sont larges).
+pub(crate) fn bouton_large(
+    ui: &mut Ui,
+    texte: &str,
+    style: Style,
+    actif: bool,
+    taille: Vec2,
+) -> Response {
     let bouton = match style {
         Style::Principal => Button::new(gras(ui, texte, 15.5).color(couleur(ACCENT_TEXTE)))
             .fill(couleur(ACCENT))
@@ -150,7 +162,7 @@ pub(crate) fn bouton(ui: &mut Ui, texte: &str, style: Style, actif: bool) -> Res
     let reponse = ui.add_enabled(
         actif,
         bouton
-            .min_size(Vec2::new(0.0, 38.0))
+            .min_size(taille)
             .corner_radius(CornerRadius::same(10)),
     );
     anneau_de_focus(ui, &reponse, 10);
@@ -216,6 +228,37 @@ pub(crate) fn bouton_symbole(
     );
     reponse.widget_info(|| WidgetInfo::labeled(WidgetType::Button, actif, nom_accessible));
     reponse
+}
+
+/// Une fenêtre modale : un voile sur tout l'écran, une carte blanche (coins de 16, marge de 28)
+/// de la largeur donnée, annoncée aux lecteurs d'écran comme un dialogue nommé. Renvoie vrai si la
+/// personne veut la fermer (touche Échap, ou clic sur le voile).
+pub(crate) fn modale(
+    ctx: &Context,
+    id: &str,
+    largeur: f32,
+    nom_accessible: &str,
+    contenu: impl FnOnce(&mut Ui),
+) -> bool {
+    let cadre = Frame::new()
+        .fill(couleur(SURFACE))
+        .corner_radius(CornerRadius::same(16))
+        .inner_margin(Margin::same(28));
+    // Sans fondu d'apparition : à la caisse la fenêtre doit être là tout de suite (et le relevé
+    // de contraste des tests ne doit pas voir des fonds translucides).
+    let reponse = egui::Modal::new(Id::new(id))
+        .area(egui::Modal::default_area(Id::new(id)).fade_in(false))
+        .backdrop_color(VOILE)
+        .frame(cadre)
+        .show(ctx, |ui| {
+            ui.set_width(largeur);
+            contenu(ui);
+        });
+    ctx.accesskit_node_builder(reponse.response.id, |noeud| {
+        noeud.set_role(Role::Dialog);
+        noeud.set_label(nom_accessible);
+    });
+    reponse.should_close()
 }
 
 #[cfg(test)]

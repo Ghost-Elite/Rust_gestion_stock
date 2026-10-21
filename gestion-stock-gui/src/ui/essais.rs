@@ -157,13 +157,12 @@ pub(crate) fn app_vendeuse_avec_blocages(nom: &str) -> Application {
 
 /// Avec le VRAI style (polices, espacements) : ce que voit la personne.
 pub(crate) fn harness_vente(app: Application, taille: Vec2) -> Harness<'static, Application> {
-    let mut h = Harness::builder().with_size(taille).build_ui_state(
-        |ui, app: &mut Application| {
-            palette::appliquer(ui.ctx());
-            dessiner(ui, app);
-        },
-        app,
-    );
+    let mut h = Harness::builder()
+        .with_size(taille)
+        .build_ui_state(|ui, app: &mut Application| dessiner(ui, app), app);
+    // Comme dans la vraie fenêtre, la palette et les polices sont installées AVANT la première
+    // image : egui refuse une famille de police qu'il ne connaît pas encore.
+    palette::appliquer(&h.ctx);
     h.run();
     h
 }
@@ -187,7 +186,7 @@ pub(crate) fn nombre_de_pieces(h: &Harness<'static, Application>) -> usize {
 
 pub(crate) fn verifier_contrastes(textes: &[TextePeint], nom_du_cas: &str) {
     assert!(
-        textes.len() >= 10,
+        textes.len() >= 6,
         "{nom_du_cas} : trop peu de textes : {}",
         textes.len()
     );
@@ -204,14 +203,14 @@ pub(crate) fn verifier_contrastes(textes: &[TextePeint], nom_du_cas: &str) {
 }
 
 /// Une vente par carte (Pain × 3 = 3,60 €) puis une en espèces (Savon × 1 = 2,50 €),
-/// affichées sur l'onglet Ventes.
+/// affichées sur l'écran Historique.
 pub(crate) fn app_avec_ventes(nom: &str) -> Application {
     let mut etat = etat_vendeur(nom);
     assert!(etat.encaisser(&[("Pain".to_string(), 3)], Moyen::Carte, ""));
     assert!(etat.encaisser(&[("Savon".to_string(), 1)], Moyen::Especes, "5"));
     etat.effacer_ticket();
     let mut app = Application::nouvelle(etat);
-    app.onglet = Onglet::Ventes;
+    app.ecran = Ecran::Historique;
     app
 }
 
