@@ -1,6 +1,6 @@
 # Base de données MySQL pour la caisse Kora Marché — conception
 
-> Statut : **à valider**. Rien n'est construit tant que ce document n'est pas approuvé.
+> Statut : **approuvé** (choix (a) du § 9 : la caisse refuse de vendre quand le serveur est injoignable). Plan 1 : `docs/superpowers/plans/2026-10-21-base-mysql-couche-stockage.md`.
 > Cette conception prolonge `2026-10-21-kora-marche-pos-design.md` (étapes B, C et D de la caisse) : elle doit être faite **avant l'étape B**, parce que B change le format des données.
 
 ## 1. Intention
@@ -68,9 +68,9 @@ Tout est en `utf8mb4`. Les clés étrangères sont déclarées. Les montants et 
 | `reglage` | `cle` (clé), `valeur` | `profil`, `devise`, `taux_defaut_bp` |
 | `caisse` | `code` (clé, 2 chiffres), `nom`, `dernier_numero`, `dernier_hash` | la ligne de tête de chaque journal, **verrouillée** pour écrire une pièce |
 | `produit` | `id`, `nom`, `nom_cle` (unique), `quantite`, `seuil`, `prix` (NULL), `taux_bp` (NULL) | `nom_cle` = nom nettoyé en minuscules **calculé par le programme**, collation binaire (`utf8mb4_bin`) : même unicité que le mode fichier, accents compris. Une collation `_ci` ferait `thé` = `the` |
-| `mouvement` | `id`, `produit_nom`, `genre` (entrée / sortie), `quantite`, `caisse`, `piece_numero` (NULL), `cree_le` | `produit_nom` est le nom en texte (comme dans le fichier) : renommer un produit le remplace partout |
+| `mouvement` | `id`, `produit_nom`, `produit_cle`, `genre` (entrée / sortie), `quantite`, `caisse`, `piece_numero` (NULL), `cree_le` | `produit_nom` est le nom en texte (comme dans le fichier) : renommer un produit le remplace partout ; `produit_cle` (même calcul que `nom_cle`, indexé) sert à retrouver ses mouvements |
 | `piece` | `caisse`, `numero`, `genre` (V / A), `annule_numero` (NULL), `utc`, `decalage_minutes`, `total`, `moyen`, `recu`, `rendu`, `hash_precedent`, `hash` | clé `(caisse, numero)` ; ni modification ni suppression par le programme |
-| `piece_ligne` | `caisse`, `numero`, `rang`, `nom`, `quantite`, `prix`, `taux_bp` | le texte canonique de l'empreinte lit ces lignes dans l'ordre de `rang` |
+| `piece_ligne` | `caisse`, `numero`, `rang`, `nom`, `nom_cle`, `quantite`, `prix`, `taux_bp` | le texte canonique de l'empreinte lit ces lignes dans l'ordre de `rang` ; `nom_cle` (indexé) sert à savoir si un produit a déjà été vendu |
 
 Contraintes : `produit.quantite >= 0` (colonne non signée), `piece.annule_numero` unique par caisse (une vente ne s'annule qu'une fois), les réglages devise/profil ne se changent pas s'il existe une pièce (le cœur le vérifie, la base ne fait que stocker).
 
