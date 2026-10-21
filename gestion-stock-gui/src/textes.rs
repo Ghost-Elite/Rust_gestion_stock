@@ -210,26 +210,16 @@ pub const BOUTON_ANNULER: &str = "Annuler";
 pub const SECTION_HISTORIQUE: &str = "Derniers mouvements";
 pub const AUCUN_MOUVEMENT: &str = "Aucun mouvement enregistré.";
 
-pub const SECTION_PRODUITS_VENTE: &str = "Produits";
-pub const RECHERCHE_VENTE: &str = "Rechercher un produit à vendre";
-pub const AUCUN_PRODUIT_VENDABLE: &str = "Aucun produit ne correspond.";
 pub const EPUISE: &str = "Épuisé";
 pub const PRIX_MANQUANT: &str = "Prix manquant";
-pub const TOUT_AU_PANIER: &str = "Tout le stock est au panier";
 
-pub const SECTION_PANIER: &str = "Panier";
-pub const PANIER_VIDE: &str = "Le panier est vide. Cliquez sur un produit pour l'ajouter.";
-pub const BOUTON_VIDER: &str = "Vider le panier";
-pub const BOUTON_RETIRER: &str = "Retirer";
 pub const PANIER_INVALIDE: &str =
     "Un produit du panier n'existe plus ou n'a plus de prix. Retirez-le pour encaisser.";
 pub const MOYEN_ESPECES: &str = "Espèces";
 pub const MOYEN_CARTE: &str = "Carte";
 pub const MOYEN_AUTRE: &str = "Autre";
 pub const CHAMP_RECU: &str = "Montant reçu";
-pub const BOUTON_MONTANT_JUSTE: &str = "Montant juste";
 pub const RECU_ILLISIBLE: &str = "Montant illisible. Tapez par exemple 20 ou 12,50.";
-pub const BOUTON_ENCAISSER: &str = "Encaisser";
 
 pub const BOUTON_NOUVELLE_VENTE: &str = "Nouvelle vente";
 pub const MENTION_NON_CERTIFIE: &str =
@@ -314,6 +304,7 @@ pub fn rembourser_le_ticket(ticket: &str) -> String {
 pub const JOURNAL_ALTERE_SUITE: &str = "Les ventes et les annulations sont bloquées ; le stock reste utilisable. Restaurez une copie du fichier de données pour vendre à nouveau.";
 
 pub const SECTION_REGLAGES: &str = "Réglages de la caisse";
+pub const SECTION_FICHIER: &str = "Fichier de données";
 pub const LIBELLE_PROFIL: &str = "Prix et taxes";
 pub const PROFIL_EUROPE: &str = "Europe (prix TTC)";
 pub const PROFIL_ETATS_UNIS: &str = "États-Unis (prix hors taxe)";
@@ -361,10 +352,6 @@ pub fn pied_de_page_donnees(chemin: &str) -> String {
     format!("Données : {chemin}")
 }
 
-pub fn stock_restant(quantite: u32) -> String {
-    format!("{quantite} en stock")
-}
-
 pub fn ajouter_au_panier(nom: &str, prix: &str) -> String {
     format!("Ajouter {nom} au panier ({prix})")
 }
@@ -381,24 +368,8 @@ pub fn ajouter_une_unite(nom: &str) -> String {
     format!("Ajouter une unité de {nom}")
 }
 
-pub fn retirer_du_panier(nom: &str) -> String {
-    format!("Retirer {nom} du panier")
-}
-
-pub fn ligne_de_panier(prix: &str, quantite: u32, total: &str) -> String {
-    format!("{prix} × {quantite} = {total}")
-}
-
-pub fn il_manque(montant: &str) -> String {
-    format!("Il manque {montant}")
-}
-
 pub fn rendu_de_monnaie(montant: &str) -> String {
     format!("{LIBELLE_RENDU} : {montant}")
-}
-
-pub fn titre_ticket(numero: u64) -> String {
-    format!("Ticket n° {numero}")
 }
 
 pub fn ligne_de_ticket(quantite: u32, nom: &str, total: &str) -> String {
@@ -431,10 +402,6 @@ pub fn libelle_taxe(profil: Profil, taux: &str) -> String {
 }
 
 /// Un stock sous le seuil d'alerte s'écrit aussi en toutes lettres sur la tuile.
-pub fn stock_bas(quantite: u32) -> String {
-    format!("{quantite} en stock (bas)")
-}
-
 pub fn prix_court(prix: &str) -> String {
     format!("Prix : {prix}")
 }

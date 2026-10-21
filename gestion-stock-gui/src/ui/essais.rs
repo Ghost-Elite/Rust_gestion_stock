@@ -278,3 +278,27 @@ pub(crate) fn etat_sur_deux_jours(nom: &str) -> (Etat, std::rc::Rc<std::cell::Ce
     assert!(etat.entree("Pain", "20"));
     (etat, utc)
 }
+
+/// « Riz 5kg » (seuil 5, stock 3, en alerte) et « Sucre » (seuil 0, stock 10, correct).
+pub(crate) fn app_avec_produits(nom: &str) -> Application {
+    let mut etat = Etat::ouvrir(chemin_temp(nom)).unwrap();
+    assert!(etat.ajouter("Riz 5kg", "5"));
+    assert!(etat.entree("Riz 5kg", "3"));
+    assert!(etat.ajouter("Sucre", "0"));
+    assert!(etat.entree("Sucre", "10"));
+    let mut app = Application::nouvelle(etat);
+    app.ecran = Ecran::Stock; // l'écran testé ici est celui du stock
+    app
+}
+
+/// Toutes les saisies remplies : aucun bouton n'est grisé (un contrôle inactif est
+/// dispensé de contraste), et un produit est sélectionné.
+pub(crate) fn app_toute_remplie(nom: &str) -> Application {
+    let mut app = app_avec_produits(nom);
+    app.selection = Some("Riz 5kg".into());
+    app.saisie_nom = "Thé vert".into();
+    app.saisie_seuil = "3".into();
+    app.saisie_quantite = "2".into();
+    app.saisie_nouveau_nom = "Riz basmati".into();
+    app
+}
