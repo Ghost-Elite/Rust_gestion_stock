@@ -57,6 +57,22 @@ impl Stock {
         Stock::default()
     }
 
+    /// Un stock réduit à ce qu'une transaction de la base a verrouillé : quelques produits, les
+    /// réglages, et les pièces dont les règles ont besoin (la dernière pièce de la caisse pour
+    /// numéroter et chaîner ; la vente à annuler et son éventuelle annulation ; une pièce qui
+    /// nomme un produit qu'on veut renommer). Il n'a pas d'historique de mouvements : tous ceux
+    /// qu'il contient après une opération sont nouveaux. Les règles du cœur s'y appliquent
+    /// telles quelles.
+    #[allow(dead_code)] // DepotMysql l'utilise (tâche 5) ; en attendant, seuls les tests l'appellent.
+    pub(crate) fn partiel(produits: Vec<Produit>, reglages: Reglages, pieces: Vec<Piece>) -> Stock {
+        Stock {
+            produits,
+            historique: Vec::new(),
+            reglages,
+            pieces,
+        }
+    }
+
     /// Cherche un produit sans tenir compte de la casse ni des espaces autour du nom.
     fn position(&self, nom: &str) -> Option<usize> {
         let cherche = nom.trim().to_lowercase();

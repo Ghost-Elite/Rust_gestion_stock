@@ -441,6 +441,154 @@ mod tests {
         articles.iter().map(|(n, q)| (n.to_string(), *q)).collect()
     }
 
+    // ---- Le cœur sur un Stock partiel (ce que charge une transaction de la base) --------------
+
+    /// Un stock complet avec trois ventes : 1 = Pain x2, 2 = Lait x1, 3 = Savon x1.
+    fn stock_avec_trois_ventes() -> Stock {
+        let mut s = stock_europe();
+        s.encaisser(&demande(&[("Pain", 2)]), Moyen::Carte, Montant(0), QUAND)
+            .unwrap();
+        s.encaisser(&demande(&[("Lait", 1)]), Moyen::Carte, Montant(0), QUAND)
+            .unwrap();
+        s.encaisser(&demande(&[("Savon", 1)]), Moyen::Carte, Montant(0), QUAND)
+            .unwrap();
+        s
+    }
+
+    /// Ce qu'une transaction chargerait : seulement ces produits et ces pièces.
+    fn partiel_de(complet: &Stock, produits: &[&str], pieces: &[u64]) -> Stock {
+        Stock::partiel(
+            complet
+                .produits()
+                .into_iter()
+                .filter(|p| produits.contains(&p.nom.as_str()))
+                .cloned()
+                .collect(),
+            complet.reglages(),
+            complet
+                .pieces()
+                .iter()
+                .filter(|p| pieces.contains(&p.numero))
+                .cloned()
+                .collect(),
+        )
+    }
+
+    #[test]
+    fn un_stock_partiel_n_a_pas_d_historique_de_mouvements() {
+        let complet = stock_avec_trois_ventes();
+        let partiel = partiel_de(&complet, &["Pain"], &[3]);
+        assert!(partiel.historique().is_empty());
+        assert_eq!(partiel.produits().len(), 1);
+        assert_eq!(partiel.pieces().len(), 1);
+        assert_eq!(partiel.reglages(), complet.reglages());
+    }
+
+    #[test]
+    fn encaisser_sur_un_stock_partiel_continue_la_numerotation_et_la_chaine() {
+        let mut complet = stock_avec_trois_ventes();
+        let mut partiel = partiel_de(&complet, &["Pain"], &[3]); // seulement la DERNIÈRE pièce
+        let panier = demande(&[("Pain", 1)]);
+        let attendue = complet
+            .encaisser(&panier, Moyen::Especes, Montant(500), QUAND)
+            .unwrap()
+            .clone();
+        let obtenue = partiel
+            .encaisser(&panier, Moyen::Especes, Montant(500), QUAND)
+            .unwrap()
+            .clone();
+        assert_eq!(obtenue.numero, 4);
+        assert_eq!(
+            obtenue, attendue,
+            "même numéro, mêmes empreintes que sur le stock complet"
+        );
+        assert_eq!(partiel.produits()[0].quantite, 7, "10 - 2 (vente 1) - 1");
+    }
+
+    #[test]
+    fn annuler_sur_un_stock_partiel_donne_la_meme_piece_qu_un_stock_complet() {
+        let mut complet = stock_avec_trois_ventes();
+        // La pièce à annuler (1) et la dernière (3), avec le produit qu'elle remet en stock.
+        let mut partiel = partiel_de(&complet, &["Pain"], &[1, 3]);
+        let attendue = complet.annuler(1, QUAND).unwrap().clone();
+        let obtenue = partiel.annuler(1, QUAND).unwrap().clone();
+        assert_eq!(obtenue, attendue);
+        assert_eq!(attendue.numero, 4);
+        assert_eq!(
+            partiel.produits()[0].quantite,
+            complet
+                .produits()
+                .iter()
+                .find(|p| p.nom == "Pain")
+                .unwrap()
+                .quantite
+        );
+        // Une seconde annulation : la pièce 4 (l'annulation) est la dernière et nomme la vente 1.
+        let mut deuxieme = partiel_de(&complet, &["Pain"], &[1, 4]);
+        assert_eq!(
+            deuxieme.annuler(1, QUAND).unwrap_err(),
+            ErreurStock::DejaAnnulee(1)
+        );
+        // Une annulation ne s'annule pas.
+        let mut sur_annulation = partiel_de(&complet, &["Pain"], &[4]);
+        assert_eq!(
+            sur_annulation.annuler(4, QUAND).unwrap_err(),
+            ErreurStock::AnnulationNonPermise(4)
+        );
+        // Une pièce qui n'est pas chargée est inconnue.
+        let mut sans_la_piece = partiel_de(&complet, &["Pain"], &[3]);
+        assert_eq!(
+            sans_la_piece.annuler(1, QUAND).unwrap_err(),
+            ErreurStock::PieceInconnue(1)
+        );
+    }
+
+    #[test]
+    fn renommer_ou_supprimer_un_produit_vendu_est_refuse_sur_un_stock_partiel() {
+        let complet = stock_avec_trois_ventes();
+        // Une SEULE pièce témoin suffit : la vente 1 porte une ligne « Pain ».
+        let mut avec_temoin = partiel_de(&complet, &["Pain"], &[1]);
+        assert_eq!(
+            avec_temoin
+                .renommer_produit("pain", "Baguette")
+                .unwrap_err(),
+            ErreurStock::ProduitVendu("Pain".to_string())
+        );
+        assert_eq!(
+            avec_temoin.supprimer_produit("PAIN").unwrap_err(),
+            ErreurStock::ProduitVendu("Pain".to_string())
+        );
+        // Sans pièce qui le nomme (ici la vente du Lait), le même produit se renomme.
+        let mut sans_temoin = partiel_de(&complet, &["Pain"], &[2]);
+        sans_temoin.renommer_produit("Pain", "Baguette").unwrap();
+        assert_eq!(sans_temoin.produits()[0].nom, "Baguette");
+    }
+
+    #[test]
+    fn les_reglages_sont_verrouilles_des_qu_une_piece_existe_dans_un_stock_partiel() {
+        let complet = stock_avec_trois_ventes();
+        let en_dollars = Reglages {
+            profil: Profil::EtatsUnis,
+            devise: Devise::Usd,
+            taux_defaut_bp: 825,
+        };
+        // Une pièce quelconque suffit à verrouiller la devise et le profil.
+        let mut avec_une_piece = partiel_de(&complet, &[], &[2]);
+        assert_eq!(
+            avec_une_piece.definir_reglages(en_dollars).unwrap_err(),
+            ErreurStock::ReglagesVerrouilles
+        );
+        // Le taux par défaut reste modifiable.
+        let nouveau_taux = Reglages {
+            taux_defaut_bp: 1000,
+            ..complet.reglages()
+        };
+        avec_une_piece.definir_reglages(nouveau_taux).unwrap();
+        // Sans aucune pièce, tout se change.
+        let mut sans_piece = partiel_de(&complet, &[], &[]);
+        sans_piece.definir_reglages(en_dollars).unwrap();
+    }
+
     #[test]
     fn europe_ttc_et_tva_par_taux() {
         // Pain x3 = 360, Lait x2 = 190, Savon x1 = 250
