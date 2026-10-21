@@ -6,6 +6,7 @@
 
 use crate::catalogue::{CATALOGUE, Suggestion, normaliser, suggerer};
 use crate::horloge;
+use crate::textes::{libelle_taxe, libelle_total, numero_de_ticket};
 use gestion_stock::erreur::ErreurStock;
 use gestion_stock::horodatage::Horodatage;
 use gestion_stock::monnaie::{Devise, Montant, lire_taux};
@@ -60,6 +61,50 @@ pub struct LignePiece {
     pub moyen: String,
     /// Vrai pour une vente qui n'a pas encore été annulée.
     pub annulable: bool,
+}
+
+/// Où en est un ticket du journal : payé, remboursé, ou l'écriture de remboursement elle-même.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StatutPiece {
+    /// Une vente qui n'a pas été remboursée.
+    Payee,
+    /// Une vente qui a été remboursée (annulée en entier).
+    Remboursee,
+    /// L'écriture inverse d'un remboursement (montant négatif).
+    Remboursement,
+}
+
+/// Une ligne d'un ticket, déjà écrite pour l'affichage.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LigneDetail {
+    pub quantite: u32,
+    pub nom: String,
+    /// Le total de la ligne : `3,60 €`.
+    pub total: String,
+}
+
+/// Un ticket du journal, prêt à être affiché : prix et taux sont ceux du moment de la vente.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DetailTicket {
+    /// Le numéro montré à la personne : `01-0186`.
+    pub ticket: String,
+    /// La date et l'heure locales : `14/11/2023 23:13`.
+    pub quand: String,
+    pub moyen: Moyen,
+    pub statut: StatutPiece,
+    /// Le nombre d'articles (la somme des quantités).
+    pub articles: u32,
+    pub lignes: Vec<LigneDetail>,
+    /// Une phrase par taux : `TVA 5,5 % incluse : 0,19 €` ou `Taxe 8 % : $0.19`.
+    pub taxes: Vec<String>,
+    /// Aux États-Unis seulement : le total hors taxe.
+    pub sous_total: Option<String>,
+    /// `Total TTC` (Europe) ou `Total` (États-Unis).
+    pub libelle_total: &'static str,
+    pub total: String,
+    /// Pour une vente en espèces seulement.
+    pub recu: Option<String>,
+    pub rendu: Option<String>,
 }
 
 /// Les trois chiffres du haut de la fenêtre.
@@ -589,6 +634,72 @@ impl Etat {
     /// Ferme le ticket affiché : la personne prépare la vente suivante.
     pub fn effacer_ticket(&mut self) {
         self.ticket = None;
+    }
+
+    fn statut_de(&self, piece: &Piece) -> StatutPiece {
+        match piece.genre {
+            GenrePiece::Annulation { .. } => StatutPiece::Remboursement,
+            GenrePiece::Vente => {
+                let annulee = self
+                    .stock
+                    .pieces()
+                    .iter()
+                    .any(|p| p.genre == GenrePiece::Annulation { de: piece.numero });
+                if annulee {
+                    StatutPiece::Remboursee
+                } else {
+                    StatutPiece::Payee
+                }
+            }
+        }
+    }
+
+    /// Le ticket d'une pièce du journal, prêt à être affiché ; `None` si le numéro n'existe pas.
+    pub fn detail_ticket(&self, numero: u64) -> Option<DetailTicket> {
+        let piece = self.stock.pieces().iter().find(|p| p.numero == numero)?;
+        let reglages = self.stock.reglages();
+        let (devise, profil) = (reglages.devise, reglages.profil);
+        let groupes = self.detail_taxes(piece);
+        let lignes = piece
+            .lignes
+            .iter()
+            .map(|l| LigneDetail {
+                quantite: l.quantite,
+                nom: l.nom.clone(),
+                total: l
+                    .prix
+                    .multiplier(l.quantite)
+                    .map(|m| devise.formater(m))
+                    .unwrap_or_default(),
+            })
+            .collect();
+        let taxes = groupes
+            .iter()
+            .map(|g| {
+                format!(
+                    "{} : {}",
+                    libelle_taxe(profil, &devise.formater_taux(g.taux_bp)),
+                    devise.formater(g.taxe)
+                )
+            })
+            .collect();
+        let sous_total = (profil == Profil::EtatsUnis)
+            .then(|| devise.formater(Montant(groupes.iter().map(|g| g.base.0).sum())));
+        let especes = piece.moyen == Moyen::Especes && piece.genre == GenrePiece::Vente;
+        Some(DetailTicket {
+            ticket: numero_de_ticket(piece.numero),
+            quand: piece.horodatage.local().en_francais(),
+            moyen: piece.moyen,
+            statut: self.statut_de(piece),
+            articles: piece.lignes.iter().map(|l| l.quantite).sum(),
+            lignes,
+            taxes,
+            sous_total,
+            libelle_total: libelle_total(profil),
+            total: devise.formater(piece.total),
+            recu: especes.then(|| devise.formater(piece.recu)),
+            rendu: especes.then(|| devise.formater(piece.rendu)),
+        })
     }
 
     /// Les pièces du journal, de la plus récente à la plus ancienne.
@@ -1371,5 +1482,94 @@ mod tests {
         assert!(noms("zzz").is_empty());
         // Une saisie vide donne tous les produits, triés par nom.
         assert_eq!(noms(""), ["Café moulu", "Riz 5kg", "Thé vert"]);
+    }
+
+    // ---- Le détail d'un ticket ------------------------------------------------------------------
+
+    /// Pain 1,20 € (TVA 5,5 %) et Savon 2,50 € (TVA par défaut, 20 %), 10 de chaque ; heure fixe.
+    fn etat_pour_tickets(nom: &str) -> Etat {
+        let mut e = Etat::ouvrir(chemin_temp(nom))
+            .unwrap()
+            .avec_horloge(|| Horodatage {
+                utc: 1_700_000_000,
+                decalage_minutes: 60,
+            });
+        assert!(e.ajouter_avec_prix("Pain", "0", "1,20", "5,5"));
+        assert!(e.entree("Pain", "10"));
+        assert!(e.ajouter_avec_prix("Savon", "0", "2,50", ""));
+        assert!(e.entree("Savon", "10"));
+        e
+    }
+
+    #[test]
+    fn le_detail_d_un_ticket_garde_les_lignes_les_taxes_et_le_total() {
+        let mut e = etat_pour_tickets("detail-carte");
+        assert!(e.encaisser(&panier(&[("Pain", 3), ("Savon", 1)]), Moyen::Carte, ""));
+        let d = e.detail_ticket(1).expect("le ticket 1");
+        assert_eq!(d.ticket, "01-0001");
+        assert_eq!(d.quand, "14/11/2023 23:13");
+        assert_eq!(d.moyen, Moyen::Carte);
+        assert_eq!(d.statut, StatutPiece::Payee);
+        assert_eq!(d.articles, 4);
+        let lignes: Vec<(u32, &str, &str)> = d
+            .lignes
+            .iter()
+            .map(|l| (l.quantite, l.nom.as_str(), l.total.as_str()))
+            .collect();
+        assert_eq!(
+            lignes,
+            [(3, "Pain", "3,60\u{a0}€"), (1, "Savon", "2,50\u{a0}€")]
+        );
+        assert_eq!(
+            d.taxes,
+            [
+                "TVA 5,5\u{a0}% incluse : 0,19\u{a0}€",
+                "TVA 20\u{a0}% incluse : 0,42\u{a0}€"
+            ]
+        );
+        assert_eq!(d.sous_total, None);
+        assert_eq!(d.libelle_total, "Total TTC");
+        assert_eq!(d.total, "6,10\u{a0}€");
+        assert_eq!((d.recu, d.rendu), (None, None));
+        assert!(e.detail_ticket(99).is_none());
+    }
+
+    #[test]
+    fn le_detail_d_un_ticket_en_especes_donne_le_recu_et_le_rendu() {
+        let mut e = etat_pour_tickets("detail-especes");
+        assert!(e.encaisser(&panier(&[("Pain", 3), ("Savon", 1)]), Moyen::Especes, "10"));
+        let d = e.detail_ticket(1).unwrap();
+        assert_eq!(d.recu.as_deref(), Some("10,00\u{a0}€"));
+        assert_eq!(d.rendu.as_deref(), Some("3,90\u{a0}€"));
+    }
+
+    #[test]
+    fn le_detail_d_un_ticket_dit_s_il_est_rembourse() {
+        let mut e = etat_pour_tickets("detail-rembourse");
+        assert!(e.encaisser(&panier(&[("Pain", 1)]), Moyen::Carte, ""));
+        assert!(e.annuler(1));
+        assert_eq!(e.detail_ticket(1).unwrap().statut, StatutPiece::Remboursee);
+        let annulation = e.detail_ticket(2).unwrap();
+        assert_eq!(annulation.statut, StatutPiece::Remboursement);
+        assert_eq!(annulation.ticket, "01-0002");
+    }
+
+    #[test]
+    fn le_detail_d_un_ticket_aux_etats_unis_donne_le_sous_total() {
+        let mut e = Etat::ouvrir(chemin_temp("detail-us"))
+            .unwrap()
+            .avec_horloge(|| Horodatage {
+                utc: 1_700_000_000,
+                decalage_minutes: 60,
+            });
+        assert!(e.definir_reglages(Profil::EtatsUnis, Devise::Usd, "8"));
+        assert!(e.ajouter_avec_prix("Pain", "0", "1.20", ""));
+        assert!(e.entree("Pain", "10"));
+        assert!(e.encaisser(&panier(&[("Pain", 2)]), Moyen::Carte, ""));
+        let d = e.detail_ticket(1).unwrap();
+        assert_eq!(d.sous_total.as_deref(), Some("$2.40"));
+        assert_eq!(d.taxes, ["Taxe 8\u{a0}% : $0.19"]);
+        assert_eq!(d.libelle_total, "Total");
+        assert_eq!(d.total, "$2.59");
     }
 }

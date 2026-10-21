@@ -12,7 +12,7 @@ use gestion_stock::horodatage::Horodatage;
 use gestion_stock::vente::Moyen;
 use gestion_stock_gui::etat::Etat;
 use gestion_stock_gui::palette;
-use gestion_stock_gui::ui::{Application, Ecran, dessiner};
+use gestion_stock_gui::ui::{Application, Ecran, Modale, dessiner};
 
 /// Une boutique d'exemple : des produits en alerte, d'autres corrects, un peu d'historique.
 fn application_exemple(nom: &str) -> Application {
@@ -79,13 +79,9 @@ fn capturer(nom: &str, taille: Vec2, app: Application) {
         .wgpu()
         .with_size(taille)
         .with_pixels_per_point(1.0)
-        .build_ui_state(
-            |ui, app: &mut Application| {
-                palette::appliquer(ui.ctx());
-                dessiner(ui, app);
-            },
-            app,
-        );
+        .build_ui_state(|ui, app: &mut Application| dessiner(ui, app), app);
+    // Comme dans la vraie fenêtre : la palette et les polices avant la première image.
+    palette::appliquer(&h.ctx);
     h.run();
     h.snapshot_options(nom, &SnapshotOptions::new().output_path(dossier));
 }
@@ -139,12 +135,35 @@ fn apercu_vente_panier() {
 
 #[test]
 #[ignore = "outil de design : lancer à la main"]
-fn apercu_vente_ticket() {
-    let mut app = vente_en_cours("vente-ticket");
+fn apercu_paiement_especes() {
+    let mut app = vente_en_cours("paiement-especes");
+    app.saisie_recu = "50".into();
+    app.modale = Some(Modale::Especes);
+    capturer("paiement_especes", Vec2::new(1366.0, 768.0), app);
+}
+
+#[test]
+#[ignore = "outil de design : lancer à la main"]
+fn apercu_paiement_carte() {
+    let mut app = vente_en_cours("paiement-carte");
+    app.modale = Some(Modale::Terminal {
+        moyen: Moyen::Carte,
+        refuse: false,
+    });
+    capturer("paiement_carte", Vec2::new(1366.0, 768.0), app);
+}
+
+#[test]
+#[ignore = "outil de design : lancer à la main"]
+fn apercu_vente_terminee() {
+    let mut app = vente_en_cours("vente-terminee");
     let etat = app.etat.as_mut().unwrap();
-    assert!(etat.encaisser(&app.panier, Moyen::Especes, "20"));
+    assert!(etat.encaisser(&app.panier, Moyen::Especes, "50"));
     app.panier.clear();
-    capturer("vente_ticket", Vec2::new(1366.0, 768.0), app);
+    app.modale = Some(Modale::VenteTerminee {
+        ticket_visible: true,
+    });
+    capturer("vente_terminee", Vec2::new(1366.0, 768.0), app);
 }
 
 #[test]

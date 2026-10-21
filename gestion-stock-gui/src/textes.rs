@@ -79,6 +79,51 @@ pub fn choisir_la_ligne(nom: &str) -> String {
     format!("Choisir {nom}")
 }
 
+// ---- Le paiement --------------------------------------------------------------------------------
+pub const ESPECES_TITRE: &str = "Paiement en espèces";
+pub const A_PAYER: &str = "À payer";
+pub const QUICK_EXACT: &str = "Exact";
+pub const MONNAIE_A_RENDRE: &str = "Monnaie à rendre";
+pub const IL_MANQUE: &str = "Il manque";
+pub const BOUTON_RETOUR: &str = "Retour";
+pub const BOUTON_VALIDER: &str = "Valider";
+pub const CARTE_TITRE: &str = "Paiement par carte";
+pub const AUTRE_TITRE: &str = "Autre moyen de paiement";
+pub const CARTE_ATTENTE: &str = "Présentez la carte sur le terminal";
+pub const CARTE_AIDE: &str = "Sans contact, puce ou piste. Saisissez le montant sur le terminal, puis confirmez ici ce qu'il affiche.";
+pub const AUTRE_ATTENTE: &str = "Le client règle autrement (mobile money, chèque, virement…).";
+pub const AUTRE_AIDE: &str = "Confirmez ici quand le paiement est reçu.";
+pub const BOUTON_ACCEPTE: &str = "Paiement accepté";
+pub const BOUTON_REFUSE: &str = "Paiement refusé";
+pub const BOUTON_RECU: &str = "Paiement reçu";
+pub const CARTE_REFUSEE: &str = "Carte refusée";
+pub const CARTE_REFUSEE_AIDE: &str =
+    "Aucun montant n'a été débité. Proposez un autre moyen de paiement.";
+pub const BOUTON_REESSAYER: &str = "Réessayer";
+pub const BOUTON_PAYER_ESPECES: &str = "Payer en espèces";
+pub const VENTE_TERMINEE: &str = "Vente terminée";
+pub const BOUTON_VOIR_TICKET: &str = "Voir le ticket";
+pub const BOUTON_CACHER_TICKET: &str = "Cacher le ticket";
+
+/// `Carte · 3,60 € · ticket enregistré`.
+pub fn vente_terminee_detail(moyen: &str, total: &str) -> String {
+    format!("{moyen} · {total} · ticket enregistré")
+}
+
+/// `Ticket 01-0186`.
+pub fn titre_du_ticket(ticket: &str) -> String {
+    format!("Ticket {ticket}")
+}
+
+pub fn nom_du_moyen(moyen: gestion_stock::vente::Moyen) -> &'static str {
+    use gestion_stock::vente::Moyen;
+    match moyen {
+        Moyen::Especes => MOYEN_ESPECES,
+        Moyen::Carte => MOYEN_CARTE,
+        Moyen::Autre => MOYEN_AUTRE,
+    }
+}
+
 pub fn stock_limite(nom: &str, disponible: u32) -> String {
     format!("{nom} : il n'en reste que {disponible}.")
 }

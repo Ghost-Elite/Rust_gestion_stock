@@ -29,6 +29,8 @@ mod composants;
 mod entete;
 #[cfg(test)]
 mod essais;
+mod paiement;
+mod ticket;
 mod vente;
 
 use composants::*;
@@ -75,12 +77,16 @@ pub enum Modale {
     Confirmer(Confirmation),
     /// Le texte tapé ne correspond à aucun article.
     Introuvable(String),
-    /// Le paiement en espèces (dessiné à la tâche 7).
+    /// Le paiement en espèces.
     Especes,
-    /// Le paiement par carte ou autre moyen, confirmé à la main (dessiné à la tâche 7).
+    /// Le paiement par carte ou autre moyen, confirmé à la main (aucun terminal n'est relié).
     Terminal {
         moyen: Moyen,
         refuse: bool,
+    },
+    /// La vente qui vient d'être enregistrée, avec le rendu de monnaie et (au choix) son ticket.
+    VenteTerminee {
+        ticket_visible: bool,
     },
 }
 
@@ -124,7 +130,8 @@ pub struct Application {
     pub toast: Option<Toast>,
     /// Le panier en cours : (nom du produit, quantité).
     pub panier: Vec<(String, u32)>,
-    pub moyen: Moyen,
+    /// Vrai quand le champ « Montant reçu » doit prendre le focus à l'image suivante.
+    pub focus_recu: bool,
     /// Ce que le client a donné, tel que tapé (pour un paiement en espèces).
     pub saisie_recu: String,
     pub recherche_vente: String,
@@ -246,8 +253,14 @@ pub fn dessiner(ui: &mut Ui, app: &mut Application) {
         Some(Modale::Menu) => entete::fenetre_menu(ui.ctx(), app),
         Some(Modale::Confirmer(question)) => vente::fenetre_confirmation(ui.ctx(), app, question),
         Some(Modale::Introuvable(saisie)) => vente::fenetre_introuvable(ui.ctx(), app, &saisie),
-        // Les fenêtres de paiement arrivent à la tâche 7.
-        Some(Modale::Especes | Modale::Terminal { .. }) | None => {}
+        Some(Modale::Especes) => paiement::fenetre_especes(ui.ctx(), app),
+        Some(Modale::Terminal { moyen, refuse }) => {
+            paiement::fenetre_terminal(ui.ctx(), app, moyen, refuse);
+        }
+        Some(Modale::VenteTerminee { ticket_visible }) => {
+            paiement::fenetre_vente_terminee(ui.ctx(), app, ticket_visible);
+        }
+        None => {}
     }
     afficher_message(ui.ctx(), app);
 }

@@ -3,16 +3,26 @@
 
 use crate::palette::{
     ACCENT, ACCENT_TEXTE, ALERTE_FOND, ALERTE_TEXTE, BORDURE_BOUTON, DANGER, FILET, FOCUS,
-    FOND_DOUX, Rgb, SURFACE, TEXTE_DISCRET, VOILE, couleur,
+    FOND_DOUX, GRISE_FOND, GRISE_TEXTE, Rgb, SURFACE, TEXTE, TEXTE_DISCRET, VOILE, couleur,
 };
 use crate::police::{Graisse, famille_disponible, police_disponible};
 use eframe::egui::accesskit::Role;
 use eframe::egui::{
-    self, Button, Color32, Context, CornerRadius, CursorIcon, FontId, Frame, Id, Margin, Pos2,
-    Response, RichText, Sense, Stroke, StrokeKind, TextEdit, Ui, Vec2, WidgetInfo, WidgetType,
+    self, Button, Color32, Context, CornerRadius, CursorIcon, FontId, Frame, Id, Layout, Margin,
+    Pos2, Response, RichText, Sense, Stroke, StrokeKind, TextEdit, Ui, Vec2, WidgetInfo,
+    WidgetType,
 };
 
 // ---- Petits éléments de style -----------------------------------------------------------------
+
+/// Une zone de taille minimale fixe : egui n'alloue que l'espace réellement utilisé par le
+/// contenu, donc une colonne « de 120 » resterait aussi étroite que son texte.
+pub(crate) fn zone(ui: &mut Ui, taille: Vec2, mise_en_page: Layout, contenu: impl FnOnce(&mut Ui)) {
+    ui.allocate_ui_with_layout(taille, mise_en_page, |ui| {
+        ui.set_min_size(taille);
+        contenu(ui);
+    });
+}
 
 /// Une carte blanche aux coins arrondis, plate : un fin bord, pas d'ombre.
 pub(crate) fn carte<R>(ui: &mut Ui, contenu: impl FnOnce(&mut Ui) -> R) -> R {
@@ -103,21 +113,10 @@ pub(crate) enum Style {
     Confirmation,
 }
 
-/// Un bouton qui ne sert que si `actif` : sans cela, un double-clic enregistrerait l'action
-/// une fois, puis afficherait « Erreur : quantité manquante » par-dessus le succès, et la
-/// personne croirait que ça a échoué et recommencerait.
+/// Un bouton de largeur libre (celle de son texte) qui ne sert que si `actif` : sans cela, un
+/// double-clic enregistrerait l'action une fois, puis afficherait « Erreur : quantité manquante »
+/// par-dessus le succès, et la personne croirait que ça a échoué et recommencerait.
 pub(crate) fn bouton(ui: &mut Ui, texte: &str, style: Style, actif: bool) -> Response {
-    bouton_large(ui, texte, style, actif, Vec2::new(0.0, 38.0))
-}
-
-/// Le même bouton avec une taille minimale au choix (les boutons des fenêtres sont larges).
-pub(crate) fn bouton_large(
-    ui: &mut Ui,
-    texte: &str,
-    style: Style,
-    actif: bool,
-    taille: Vec2,
-) -> Response {
     let bouton = match style {
         Style::Principal => Button::new(gras(ui, texte, 15.5).color(couleur(ACCENT_TEXTE)))
             .fill(couleur(ACCENT))
@@ -133,11 +132,49 @@ pub(crate) fn bouton_large(
     let reponse = ui.add_enabled(
         actif,
         bouton
-            .min_size(taille)
+            .min_size(Vec2::new(0.0, 38.0))
             .corner_radius(CornerRadius::same(10)),
     );
     anneau_de_focus(ui, &reponse, 10);
     reponse
+}
+
+/// Le même bouton, mais d'une taille exacte (ceux des fenêtres et des colonnes), dessiné à la main :
+/// le texte y est toujours centré, alors qu'un bouton egui colle son texte à gauche dans une
+/// colonne alignée à gauche. Grisé, il prend les couleurs des contrôles inactifs de la maquette.
+pub(crate) fn bouton_large(
+    ui: &mut Ui,
+    texte: &str,
+    style: Style,
+    actif: bool,
+    taille: Vec2,
+) -> Response {
+    let (fond, contour, couleur_texte) = match (actif, style) {
+        (false, _) => (GRISE_FOND, Stroke::NONE, GRISE_TEXTE),
+        (true, Style::Principal) => (ACCENT, Stroke::NONE, ACCENT_TEXTE),
+        (true, Style::Secondaire) => (SURFACE, Stroke::new(1.0, couleur(BORDURE_BOUTON)), TEXTE),
+        (true, Style::Danger) => (
+            SURFACE,
+            Stroke::new(1.0, couleur(ALERTE_TEXTE)),
+            ALERTE_TEXTE,
+        ),
+        (true, Style::Confirmation) => (DANGER, Stroke::NONE, ACCENT_TEXTE),
+    };
+    bouton_a_lignes(
+        ui,
+        texte,
+        taille,
+        fond,
+        contour,
+        10,
+        &[LigneBouton {
+            texte,
+            taille: if taille.y >= 50.0 { 17.0 } else { 15.0 },
+            graisse: Graisse::SemiGrasse,
+            couleur: couleur_texte,
+        }],
+        actif,
+    )
 }
 
 /// Le contour de focus clavier (2, couleur de focus) : egui le dessine seul tant que le contour
@@ -373,25 +410,36 @@ mod tests {
     }
 
     /// Dessine un bouton sur trois images ; si `focus`, le bouton reçoit le focus clavier.
-    fn dessiner_bouton(style: Style, focus: bool) -> Vec<eframe::egui::epaint::ClippedShape> {
+    fn dessiner_bouton(
+        style: Style,
+        focus: bool,
+        grand: bool,
+    ) -> Vec<eframe::egui::epaint::ClippedShape> {
         let ctx = Context::default();
         palette::appliquer(&ctx);
         let entree = || RawInput {
             screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(400.0, 200.0))),
             ..Default::default()
         };
+        let dessiner = |ui: &mut Ui| {
+            if grand {
+                bouton_large(ui, "Test", style, true, Vec2::new(200.0, 56.0))
+            } else {
+                bouton(ui, "Test", style, true)
+            }
+        };
         let mut id = Id::NULL;
         let _ = ctx.run_ui(entree(), |ui| {
-            id = bouton(ui, "Test", style, true).id;
+            id = dessiner(ui).id;
         });
         if focus {
             ctx.memory_mut(|m| m.request_focus(id));
         }
         let _ = ctx.run_ui(entree(), |ui| {
-            bouton(ui, "Test", style, true);
+            dessiner(ui);
         });
         ctx.run_ui(entree(), |ui| {
-            bouton(ui, "Test", style, true);
+            dessiner(ui);
         })
         .shapes
     }
@@ -399,20 +447,22 @@ mod tests {
     #[test]
     fn le_focus_clavier_d_un_bouton_se_voit_meme_avec_un_contour_fixe() {
         let focus = couleur(FOCUS);
-        for style in [
-            Style::Principal,
-            Style::Secondaire,
-            Style::Danger,
-            Style::Confirmation,
-        ] {
-            assert!(
-                a_un_contour(&dessiner_bouton(style, true), focus, 2.0),
-                "pas d'anneau de focus"
-            );
-            assert!(
-                !a_un_contour(&dessiner_bouton(style, false), focus, 2.0),
-                "anneau de focus sans focus"
-            );
+        for grand in [false, true] {
+            for style in [
+                Style::Principal,
+                Style::Secondaire,
+                Style::Danger,
+                Style::Confirmation,
+            ] {
+                assert!(
+                    a_un_contour(&dessiner_bouton(style, true, grand), focus, 2.0),
+                    "pas d'anneau de focus (grand : {grand})"
+                );
+                assert!(
+                    !a_un_contour(&dessiner_bouton(style, false, grand), focus, 2.0),
+                    "anneau de focus sans focus (grand : {grand})"
+                );
+            }
         }
     }
 
@@ -428,8 +478,59 @@ mod tests {
     }
 
     #[test]
+    fn le_texte_d_un_bouton_large_est_centre_meme_dans_une_colonne() {
+        use eframe::egui::{Align, Layout};
+        let ctx = Context::default();
+        palette::appliquer(&ctx);
+        let entree = || RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(500.0, 200.0))),
+            ..Default::default()
+        };
+        let mut rect = Rect::NOTHING;
+        for _ in 0..2 {
+            let sortie = ctx.run_ui(entree(), |ui| {
+                // Une colonne alignée à gauche, comme dans `ui.columns` : l'ancien bouton egui y
+                // collait son texte à gauche.
+                ui.allocate_ui_with_layout(
+                    Vec2::new(300.0, 80.0),
+                    Layout::top_down(Align::Min),
+                    |ui| {
+                        rect = bouton_large(
+                            ui,
+                            "Paiement accepté",
+                            Style::Secondaire,
+                            true,
+                            Vec2::new(300.0, 56.0),
+                        )
+                        .rect;
+                    },
+                );
+            });
+            fn centre_du_texte(forme: &Shape) -> Option<f32> {
+                match forme {
+                    Shape::Vec(v) => v.iter().find_map(centre_du_texte),
+                    Shape::Text(t) if t.galley.job.text == "Paiement accepté" => {
+                        Some(t.pos.x + t.galley.rect.center().x)
+                    }
+                    _ => None,
+                }
+            }
+            if let Some(centre) = sortie.shapes.iter().find_map(|f| centre_du_texte(&f.shape)) {
+                assert!(
+                    (centre - rect.center().x).abs() < 1.5,
+                    "texte centré en {centre}, bouton centré en {}",
+                    rect.center().x
+                );
+                assert_eq!(rect.size(), Vec2::new(300.0, 56.0));
+                return;
+            }
+        }
+        panic!("le texte du bouton n'est pas peint");
+    }
+
+    #[test]
     fn un_bouton_secondaire_garde_le_contour_clair_de_la_maquette() {
-        let formes = dessiner_bouton(Style::Secondaire, false);
+        let formes = dessiner_bouton(Style::Secondaire, false, false);
         assert!(a_un_contour(&formes, couleur(BORDURE_BOUTON), 1.0));
     }
 }

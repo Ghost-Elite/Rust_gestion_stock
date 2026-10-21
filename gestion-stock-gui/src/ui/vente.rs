@@ -6,7 +6,7 @@
 
 use super::composants::{
     LigneBouton, Style, bandeau_alerte, bouton_a_lignes, bouton_large, bouton_symbole, carte_marge,
-    discret, modale, repere,
+    discret, modale, repere, zone,
 };
 use super::{
     Application, Confirmation, Ecran, LARGEUR_CAISSE_DEUX_COLONNES, LARGEUR_DEUX_COLONNES, Modale,
@@ -34,15 +34,6 @@ const HAUTEUR_LIGNE: f32 = 68.0;
 const HAUTEUR_PIED: f32 = 46.0;
 const HAUTEUR_CASE: f32 = 64.0;
 const HAUTEUR_TICKET_ETROIT: f32 = 420.0;
-
-/// Une zone de taille minimale fixe : egui n'alloue que l'espace réellement utilisé par le
-/// contenu, donc une colonne « de 120 » resterait aussi étroite que son texte.
-fn zone(ui: &mut Ui, taille: Vec2, mise_en_page: Layout, contenu: impl FnOnce(&mut Ui)) {
-    ui.allocate_ui_with_layout(taille, mise_en_page, |ui| {
-        ui.set_min_size(taille);
-        contenu(ui);
-    });
-}
 
 /// Le devis du ticket : `None` s'il est vide.
 type DevisTicket = Option<Result<Devis, ErreurStock>>;
@@ -661,6 +652,7 @@ fn boutons_de_paiement(ui: &mut Ui, app: &mut Application, actif: bool) {
     );
     if especes.clicked() {
         app.saisie_recu.clear();
+        app.focus_recu = true;
         app.modale = Some(Modale::Especes);
     }
     ui.horizontal(|ui| {
