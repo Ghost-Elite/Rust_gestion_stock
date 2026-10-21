@@ -12,7 +12,7 @@ use gestion_stock::horodatage::Horodatage;
 use gestion_stock::vente::Moyen;
 use gestion_stock_gui::etat::Etat;
 use gestion_stock_gui::palette;
-use gestion_stock_gui::ui::{Application, Ecran, Modale, dessiner};
+use gestion_stock_gui::ui::{Application, Confirmation, Ecran, Modale, dessiner};
 
 /// Une boutique d'exemple : des produits en alerte, d'autres corrects, un peu d'historique.
 fn application_exemple(nom: &str) -> Application {
@@ -52,6 +52,7 @@ fn application_exemple(nom: &str) -> Application {
     ] {
         assert!(etat.definir_prix(produit, prix, taux));
     }
+    etat.retour = None; // pas de message éphémère sur les images
     let mut app = Application::nouvelle(etat);
     app.ecran = Ecran::Stock;
     app
@@ -86,51 +87,32 @@ fn capturer(nom: &str, taille: Vec2, app: Application) {
     h.snapshot_options(nom, &SnapshotOptions::new().output_path(dossier));
 }
 
-// Un test par capture : le moteur de test veut un seul rendu par test.
+// Un test par capture : le moteur de test veut un seul rendu par test. Toutes à la taille de la
+// maquette (1366 × 768), à comparer aux images de
+// `docs/superpowers/specs/2026-10-21-kora-marche-pos/maquette/`.
 
-#[test]
-#[ignore = "outil de design : lancer à la main"]
-fn apercu_liste_et_commandes() {
-    let mut app = application_exemple("selection");
-    app.selection = Some("Farine de blé 25kg".into());
-    app.saisie_quantite = "5".into();
-    capturer("liste_et_commandes", Vec2::new(1366.0, 768.0), app);
-}
-
-#[test]
-#[ignore = "outil de design : lancer à la main"]
-fn apercu_liste_sans_selection() {
-    capturer(
-        "liste_sans_selection",
-        Vec2::new(1366.0, 768.0),
-        application_exemple("sans-selection"),
-    );
-}
-
-#[test]
-#[ignore = "outil de design : lancer à la main"]
-fn apercu_fenetre_etroite() {
-    let mut app = application_exemple("etroit");
-    app.selection = Some("Savon de Marseille".into());
-    capturer("fenetre_etroite", Vec2::new(520.0, 760.0), app);
-}
+const ECRAN: Vec2 = Vec2::new(1366.0, 768.0);
 
 #[test]
 #[ignore = "outil de design : lancer à la main"]
 fn apercu_vente_vide() {
     let mut app = application_exemple("vente-vide");
     app.ecran = Ecran::Vente;
-    capturer("vente_vide", Vec2::new(1366.0, 768.0), app);
+    capturer("vente_vide", ECRAN, app);
 }
 
 #[test]
 #[ignore = "outil de design : lancer à la main"]
 fn apercu_vente_panier() {
-    capturer(
-        "vente_panier",
-        Vec2::new(1366.0, 768.0),
-        vente_en_cours("vente-panier"),
-    );
+    capturer("vente_panier", ECRAN, vente_en_cours("vente-panier"));
+}
+
+#[test]
+#[ignore = "outil de design : lancer à la main"]
+fn apercu_vente_confirmation() {
+    let mut app = vente_en_cours("vente-confirmation");
+    app.modale = Some(Modale::Confirmer(Confirmation::AnnulerVente));
+    capturer("vente_confirmation", ECRAN, app);
 }
 
 #[test]
@@ -139,7 +121,7 @@ fn apercu_paiement_especes() {
     let mut app = vente_en_cours("paiement-especes");
     app.saisie_recu = "50".into();
     app.modale = Some(Modale::Especes);
-    capturer("paiement_especes", Vec2::new(1366.0, 768.0), app);
+    capturer("paiement_especes", ECRAN, app);
 }
 
 #[test]
@@ -150,7 +132,7 @@ fn apercu_paiement_carte() {
         moyen: Moyen::Carte,
         refuse: false,
     });
-    capturer("paiement_carte", Vec2::new(1366.0, 768.0), app);
+    capturer("paiement_carte", ECRAN, app);
 }
 
 #[test]
@@ -159,11 +141,12 @@ fn apercu_vente_terminee() {
     let mut app = vente_en_cours("vente-terminee");
     let etat = app.etat.as_mut().unwrap();
     assert!(etat.encaisser(&app.panier, Moyen::Especes, "50"));
+    etat.retour = None;
     app.panier.clear();
     app.modale = Some(Modale::VenteTerminee {
         ticket_visible: true,
     });
-    capturer("vente_terminee", Vec2::new(1366.0, 768.0), app);
+    capturer("vente_terminee", ECRAN, app);
 }
 
 #[test]
@@ -173,17 +156,7 @@ fn apercu_recherche() {
     app.ouvrir_la_recherche("a".into());
     app.panier = vec![("Riz parfumé 5kg".to_string(), 1)];
     app.ajoute = Some("Riz parfumé 5kg".to_string());
-    capturer("recherche", Vec2::new(1366.0, 768.0), app);
-}
-
-#[test]
-#[ignore = "outil de design : lancer à la main"]
-fn apercu_vente_etroite() {
-    capturer(
-        "vente_etroite",
-        Vec2::new(520.0, 900.0),
-        vente_en_cours("vente-etroite"),
-    );
+    capturer("recherche", ECRAN, app);
 }
 
 #[test]
@@ -196,10 +169,20 @@ fn apercu_historique() {
     assert!(etat.encaisser(&[("Riz parfumé 5kg".to_string(), 1)], Moyen::Autre, ""));
     assert!(etat.annuler(3));
     etat.effacer_ticket();
+    etat.retour = None;
     app.panier.clear();
     app.ecran = Ecran::Historique;
     app.historique.choisi = Some(1);
-    capturer("historique", Vec2::new(1366.0, 768.0), app);
+    capturer("historique", ECRAN, app);
+}
+
+#[test]
+#[ignore = "outil de design : lancer à la main"]
+fn apercu_stock() {
+    let mut app = application_exemple("stock");
+    app.selection = Some("Farine de blé 25kg".into());
+    app.saisie_quantite = "5".into();
+    capturer("stock", ECRAN, app);
 }
 
 #[test]
@@ -207,15 +190,23 @@ fn apercu_historique() {
 fn apercu_reglages() {
     let mut app = application_exemple("reglages");
     app.ecran = Ecran::Reglages;
-    capturer("reglages", Vec2::new(1100.0, 720.0), app);
+    capturer("reglages", ECRAN, app);
 }
 
 #[test]
 #[ignore = "outil de design : lancer à la main"]
-fn apercu_stock_avec_prix() {
-    let mut app = application_exemple("stock-prix");
-    app.selection = Some("Riz parfumé 5kg".into());
-    app.saisie_prix_produit = "8,90".into();
-    app.saisie_taux_produit = "5,5".into();
-    capturer("stock_avec_prix", Vec2::new(1100.0, 900.0), app);
+fn apercu_menu() {
+    let mut app = vente_en_cours("menu");
+    app.modale = Some(Modale::Menu);
+    capturer("menu", ECRAN, app);
+}
+
+#[test]
+#[ignore = "outil de design : lancer à la main"]
+fn apercu_vente_etroite() {
+    capturer(
+        "vente_etroite",
+        Vec2::new(640.0, 900.0),
+        vente_en_cours("vente-etroite"),
+    );
 }
