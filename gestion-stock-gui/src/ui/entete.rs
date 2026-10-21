@@ -1,7 +1,7 @@
 //! L'en-tête sombre (magasin, caisse, heure, retour à la vente) et la fenêtre Menu.
 
 use super::composants::{Style, bouton_large, discret, modale};
-use super::{Application, Ecran, Modale};
+use super::{Application, Ecran};
 use crate::etat::chemin_complet;
 use crate::palette::{ENTETE_DISCRET, ENTETE_TEXTE, SURFACE, TEXTE, couleur};
 use crate::police::{Graisse, police_disponible};
@@ -14,22 +14,15 @@ use std::time::Duration;
 /// Au bout de combien de temps l'heure affichée est rafraîchie.
 const RAFRAICHIR_HEURE: Duration = Duration::from_secs(10);
 
-/// Un bouton de l'en-tête : blanc plein (retour à la vente) ou simple contour clair. Son anneau de
+/// Le bouton blanc de l'en-tête (retour à la vente). Son anneau de
 /// focus est blanc : l'accent bleu ne ferait pas 3:1 sur le fond sombre.
-fn bouton_entete(ui: &mut Ui, texte: &str, plein: bool) -> bool {
+fn bouton_entete(ui: &mut Ui, texte: &str) -> bool {
     let etiquette =
         RichText::new(texte).font(police_disponible(ui.ctx(), Graisse::SemiGrasse, 15.0));
-    let bouton = if plein {
+    let reponse = ui.add(
         Button::new(etiquette.color(couleur(TEXTE)))
             .fill(couleur(SURFACE))
             .stroke(Stroke::NONE)
-    } else {
-        Button::new(etiquette.color(couleur(ENTETE_TEXTE)))
-            .fill(eframe::egui::Color32::TRANSPARENT)
-            .stroke(Stroke::new(1.0, couleur(ENTETE_DISCRET)))
-    };
-    let reponse = ui.add(
-        bouton
             .min_size(Vec2::new(0.0, 40.0))
             .corner_radius(CornerRadius::same(8)),
     );
@@ -45,7 +38,7 @@ fn bouton_entete(ui: &mut Ui, texte: &str, plein: bool) -> bool {
 }
 
 /// Le contenu de l'en-tête : le magasin et la caisse à gauche ; à droite l'heure et, selon
-/// l'écran, « Retour à la vente » ou (provisoirement, jusqu'à la barre de fonctions) « Menu ».
+/// l'écran, « Retour à la vente » (la vente, elle, a son « Menu » dans la barre de fonctions).
 pub(super) fn entete(ui: &mut Ui, app: &mut Application) {
     let heure = app
         .etat
@@ -66,11 +59,7 @@ pub(super) fn entete(ui: &mut Ui, app: &mut Application) {
                 .color(couleur(ENTETE_DISCRET)),
         );
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            if app.ecran == Ecran::Vente {
-                if bouton_entete(ui, BOUTON_MENU, false) {
-                    app.modale = Some(Modale::Menu);
-                }
-            } else if bouton_entete(ui, BOUTON_RETOUR_VENTE, true) {
+            if app.ecran != Ecran::Vente && bouton_entete(ui, BOUTON_RETOUR_VENTE) {
                 app.ecran = Ecran::Vente;
             }
             if app.ecran != Ecran::Historique {

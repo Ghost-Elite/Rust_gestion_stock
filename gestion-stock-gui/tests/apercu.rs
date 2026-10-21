@@ -57,16 +57,19 @@ fn application_exemple(nom: &str) -> Application {
     app
 }
 
-/// La vente en cours : un panier de trois lignes, payé en espèces.
+/// La vente en cours : sept lignes comme dans la maquette, la dernière choisie.
 fn vente_en_cours(nom: &str) -> Application {
     let mut app = application_exemple(nom);
     app.ecran = Ecran::Vente;
     app.panier = vec![
         ("Riz parfumé 5kg".to_string(), 1),
-        ("Sucre en poudre 1kg".to_string(), 2),
+        ("Huile d'arachide 1 L".to_string(), 2),
         ("Café moulu 250g".to_string(), 1),
+        ("Lait concentré".to_string(), 3),
+        ("Sucre en poudre 1kg".to_string(), 2),
+        ("Farine de blé 25kg".to_string(), 1),
     ];
-    app.saisie_recu = "20".into();
+    app.ligne_choisie = Some("Sucre en poudre 1kg".to_string());
     app
 }
 
@@ -95,7 +98,7 @@ fn apercu_liste_et_commandes() {
     let mut app = application_exemple("selection");
     app.selection = Some("Farine de blé 25kg".into());
     app.saisie_quantite = "5".into();
-    capturer("liste_et_commandes", Vec2::new(1040.0, 700.0), app);
+    capturer("liste_et_commandes", Vec2::new(1366.0, 768.0), app);
 }
 
 #[test]
@@ -103,7 +106,7 @@ fn apercu_liste_et_commandes() {
 fn apercu_liste_sans_selection() {
     capturer(
         "liste_sans_selection",
-        Vec2::new(1040.0, 700.0),
+        Vec2::new(1366.0, 768.0),
         application_exemple("sans-selection"),
     );
 }
@@ -121,7 +124,7 @@ fn apercu_fenetre_etroite() {
 fn apercu_vente_vide() {
     let mut app = application_exemple("vente-vide");
     app.ecran = Ecran::Vente;
-    capturer("vente_vide", Vec2::new(1040.0, 700.0), app);
+    capturer("vente_vide", Vec2::new(1366.0, 768.0), app);
 }
 
 #[test]
@@ -129,7 +132,7 @@ fn apercu_vente_vide() {
 fn apercu_vente_panier() {
     capturer(
         "vente_panier",
-        Vec2::new(1040.0, 700.0),
+        Vec2::new(1366.0, 768.0),
         vente_en_cours("vente-panier"),
     );
 }
@@ -141,7 +144,7 @@ fn apercu_vente_ticket() {
     let etat = app.etat.as_mut().unwrap();
     assert!(etat.encaisser(&app.panier, Moyen::Especes, "20"));
     app.panier.clear();
-    capturer("vente_ticket", Vec2::new(1040.0, 700.0), app);
+    capturer("vente_ticket", Vec2::new(1366.0, 768.0), app);
 }
 
 #[test]

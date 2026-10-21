@@ -40,6 +40,11 @@ fn lire_prefixe(saisie: &str) -> (u32, &str) {
     (quantite, nom)
 }
 
+/// Ce qui reste du texte une fois la quantité retirée : c'est lui que l'on met dans la recherche.
+pub fn texte_recherche(saisie: &str) -> String {
+    lire_prefixe(saisie.trim()).1.to_string()
+}
+
 /// Analyse le texte tapé contre la liste des produits.
 pub fn analyser(saisie: &str, produits: &[LigneProduit]) -> ResultatScan {
     let saisie = saisie.trim();
@@ -169,6 +174,14 @@ mod tests {
             analyser("3 x", &produits()),
             ResultatScan::Introuvable("3 x".to_string())
         );
+    }
+
+    #[test]
+    fn le_texte_de_recherche_n_a_plus_la_quantite() {
+        assert_eq!(texte_recherche("2 x lai"), "lai");
+        assert_eq!(texte_recherche("  lai  "), "lai");
+        assert_eq!(texte_recherche("3*pain"), "pain");
+        assert_eq!(texte_recherche("1000 x pain"), "1000 x pain");
     }
 
     #[test]

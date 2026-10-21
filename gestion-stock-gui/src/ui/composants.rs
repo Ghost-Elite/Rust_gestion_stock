@@ -2,14 +2,14 @@
 //! Les couleurs viennent de `palette`, où leur contraste est vérifié par des tests.
 
 use crate::palette::{
-    ACCENT, ACCENT_TEXTE, ALERTE_FOND, ALERTE_TEXTE, BORDURE_BOUTON, DANGER, FILET, FOCUS, SURFACE,
-    TEXTE_DISCRET, VOILE, couleur,
+    ACCENT, ACCENT_TEXTE, ALERTE_FOND, ALERTE_TEXTE, BORDURE_BOUTON, DANGER, FILET, FOCUS,
+    FOND_DOUX, Rgb, SURFACE, TEXTE_DISCRET, VOILE, couleur,
 };
-use crate::police::{Graisse, famille_disponible};
+use crate::police::{Graisse, famille_disponible, police_disponible};
 use eframe::egui::accesskit::Role;
 use eframe::egui::{
-    self, Button, Context, CornerRadius, FontId, Frame, Id, Margin, Response, RichText, Stroke,
-    StrokeKind, TextEdit, Ui, Vec2, WidgetInfo, WidgetType,
+    self, Button, Color32, Context, CornerRadius, CursorIcon, FontId, Frame, Id, Margin, Pos2,
+    Response, RichText, Sense, Stroke, StrokeKind, TextEdit, Ui, Vec2, WidgetInfo, WidgetType,
 };
 
 // ---- Petits éléments de style -----------------------------------------------------------------
@@ -89,35 +89,6 @@ pub(crate) fn champ(ui: &mut Ui, libelle: &str, valeur: &mut String) -> Response
             .margin(Margin::symmetric(10, 8)),
     )
     .labelled_by(etiquette.id)
-}
-
-/// Un champ de saisie sur la même ligne que son libellé, pour gagner de la hauteur. On peut
-/// y ajouter quelque chose à droite : `reserve` est la largeur à lui laisser.
-pub(crate) fn champ_en_ligne(
-    ui: &mut Ui,
-    libelle: &str,
-    valeur: &mut String,
-    reserve: f32,
-    a_droite: impl FnOnce(&mut Ui),
-) -> Response {
-    ui.horizontal(|ui| {
-        let etiquette = ui.label(
-            RichText::new(libelle)
-                .size(13.5)
-                .color(couleur(TEXTE_DISCRET)),
-        );
-        let largeur = (ui.available_width() - reserve - ui.spacing().item_spacing.x).max(60.0);
-        let champ = ui
-            .add(
-                TextEdit::singleline(valeur)
-                    .desired_width(largeur)
-                    .margin(Margin::symmetric(10, 8)),
-            )
-            .labelled_by(etiquette.id);
-        a_droite(ui);
-        champ
-    })
-    .inner
 }
 
 #[derive(Clone, Copy)]
@@ -219,15 +190,132 @@ pub(crate) fn bouton_symbole(
     symbole: &str,
     nom_accessible: &str,
     actif: bool,
+    cote: f32,
 ) -> Response {
     let reponse = ui.add_enabled(
         actif,
-        Button::new(RichText::new(symbole).size(18.0))
-            .min_size(Vec2::splat(38.0))
-            .corner_radius(CornerRadius::same(10)),
+        Button::new(RichText::new(symbole).size(22.0))
+            .min_size(Vec2::splat(cote))
+            .stroke(Stroke::new(1.0, couleur(BORDURE_BOUTON)))
+            .corner_radius(CornerRadius::same(8)),
     );
+    anneau_de_focus(ui, &reponse, 8);
     reponse.widget_info(|| WidgetInfo::labeled(WidgetType::Button, actif, nom_accessible));
     reponse
+}
+
+/// Une ligne de texte d'un bouton à plusieurs lignes.
+pub(crate) struct LigneBouton<'a> {
+    pub texte: &'a str,
+    pub taille: f32,
+    pub graisse: Graisse,
+    pub couleur: Rgb,
+}
+
+/// Un bouton dessiné à la main, de taille exacte, avec une ou plusieurs lignes de texte centrées
+/// (un bouton egui centre mal un texte sur plusieurs lignes). C'est un vrai contrôle : focus clavier
+/// avec son anneau, curseur main, survol, état grisé, et un nom complet pour les lecteurs d'écran.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn bouton_a_lignes(
+    ui: &mut Ui,
+    nom_accessible: &str,
+    taille: Vec2,
+    fond: Rgb,
+    contour: Stroke,
+    rayon: u8,
+    lignes: &[LigneBouton],
+    actif: bool,
+) -> Response {
+    let sense = if actif {
+        Sense::click()
+    } else {
+        Sense::hover()
+    };
+    let (rect, reponse) = ui.allocate_exact_size(taille, sense);
+    if ui.is_rect_visible(rect) {
+        let galeries: Vec<_> = lignes
+            .iter()
+            .map(|ligne| {
+                ui.painter().layout_no_wrap(
+                    ligne.texte.to_string(),
+                    police_disponible(ui.ctx(), ligne.graisse, ligne.taille),
+                    couleur(ligne.couleur),
+                )
+            })
+            .collect();
+        let ecart = 2.0;
+        let hauteur: f32 = galeries.iter().map(|g| g.size().y).sum::<f32>()
+            + ecart * galeries.len().saturating_sub(1) as f32;
+        let peintre = ui.painter();
+        peintre.rect(
+            rect,
+            CornerRadius::same(rayon),
+            couleur(fond),
+            contour,
+            StrokeKind::Inside,
+        );
+        if actif && reponse.hovered() {
+            peintre.rect_filled(
+                rect,
+                CornerRadius::same(rayon),
+                Color32::from_black_alpha(18),
+            );
+        }
+        let mut y = rect.center().y - hauteur / 2.0;
+        for (galerie, ligne) in galeries.into_iter().zip(lignes) {
+            let x = rect.center().x - galerie.size().x / 2.0;
+            let h = galerie.size().y;
+            peintre.galley(Pos2::new(x, y), galerie, couleur(ligne.couleur));
+            y += h + ecart;
+        }
+    }
+    anneau_de_focus(ui, &reponse, rayon);
+    reponse.widget_info(|| WidgetInfo::labeled(WidgetType::Button, actif, nom_accessible));
+    if actif {
+        reponse.on_hover_cursor(CursorIcon::PointingHand)
+    } else {
+        reponse
+    }
+}
+
+/// Les initiales d'un produit (deux lettres au plus) : première lettre des deux premiers mots, ou
+/// les deux premières lettres s'il n'y a qu'un mot utile.
+pub(crate) fn initiales(nom: &str) -> String {
+    let mots: Vec<&str> = nom.split_whitespace().collect();
+    let mut lettres: Vec<char> = mots
+        .iter()
+        .filter_map(|mot| mot.chars().next())
+        .filter(|c| c.is_alphabetic())
+        .take(2)
+        .collect();
+    if lettres.len() < 2 {
+        lettres = mots
+            .first()
+            .map(|mot| mot.chars().filter(|c| c.is_alphabetic()).take(2).collect())
+            .unwrap_or_default();
+    }
+    lettres.iter().flat_map(|c| c.to_uppercase()).collect()
+}
+
+/// Le repère d'un produit (ses images n'existent pas encore) : un carré arrondi gris clair avec
+/// ses initiales.
+pub(crate) fn repere(ui: &mut Ui, nom: &str, cote: f32) {
+    let (rect, _) = ui.allocate_exact_size(Vec2::splat(cote), Sense::hover());
+    if !ui.is_rect_visible(rect) {
+        return;
+    }
+    let galerie = ui.painter().layout_no_wrap(
+        initiales(nom),
+        police_disponible(ui.ctx(), Graisse::SemiGrasse, cote * 0.32),
+        couleur(TEXTE_DISCRET),
+    );
+    let peintre = ui.painter();
+    peintre.rect_filled(rect, CornerRadius::same(8), couleur(FOND_DOUX));
+    peintre.galley(
+        rect.center() - galerie.size() / 2.0,
+        galerie,
+        couleur(TEXTE_DISCRET),
+    );
 }
 
 /// Une fenêtre modale : un voile sur tout l'écran, une carte blanche (coins de 16, marge de 28)
@@ -326,6 +414,17 @@ mod tests {
                 "anneau de focus sans focus"
             );
         }
+    }
+
+    #[test]
+    fn le_repere_d_un_produit_porte_ses_initiales() {
+        assert_eq!(initiales("Riz parfumé 5 kg"), "RP");
+        assert_eq!(initiales("thé vert"), "TV");
+        assert_eq!(initiales("Baguette"), "BA");
+        // Un seul mot utile : ses deux premières lettres.
+        assert_eq!(initiales("Riz 5kg"), "RI");
+        assert_eq!(initiales(""), "");
+        assert_eq!(initiales("   "), "");
     }
 
     #[test]

@@ -30,6 +30,81 @@ pub const ECRAN_REGLAGES: &str = "Réglages";
 pub const BOUTON_FERMER: &str = "Fermer";
 pub const RECHERCHE_TITRE: &str = "Rechercher un article";
 
+// ---- L'écran de vente ---------------------------------------------------------------------------
+/// Le texte d'invite du champ de scan, aussi son nom pour les lecteurs d'écran.
+pub const CHAMP_SCAN: &str = "Scannez un article ou tapez son nom";
+pub const TICKET_VIDE_TITRE: &str = "Prêt pour une nouvelle vente";
+pub const TICKET_VIDE_AIDE: &str = "Scannez le premier article pour commencer.";
+pub const LIBELLE_TOTAL_GRAND: &str = "TOTAL";
+pub const BOUTON_ESPECES: &str = "Espèces";
+pub const BOUTON_CARTE: &str = "Carte";
+pub const BOUTON_AUTRE: &str = "Autre";
+pub const FONCTION_RECHERCHER: &str = "Rechercher";
+pub const FONCTION_SUPPRIMER: &str = "Supprimer l'article";
+pub const FONCTION_ANNULER: &str = "Annuler la vente";
+pub const FONCTION_MENU: &str = "Menu";
+pub const FONCTION_MENU_DETAIL: &str = "Historique, stock…";
+pub const RACCOURCI_RECHERCHER: &str = "F2";
+pub const RACCOURCI_SUPPRIMER: &str = "Suppr";
+pub const RACCOURCI_ANNULER: &str = "Échap";
+pub const TOAST_AUCUNE_VENTE: &str = "Aucune vente en cours";
+pub const TOAST_VENTE_ANNULEE: &str = "Vente annulée";
+pub const OUI_ANNULER: &str = "Oui, annuler";
+pub const OUI_SUPPRIMER: &str = "Oui, supprimer";
+pub const NON_REVENIR: &str = "Non, revenir";
+pub const INTROUVABLE_TITRE: &str = "Article introuvable";
+pub const SCANNER_A_NOUVEAU: &str = "Scanner à nouveau";
+
+/// `16 articles`, `1 article` (au singulier jusqu'à un).
+pub fn articles_au_ticket(nombre: u32) -> String {
+    if nombre > 1 {
+        format!("{nombre} articles")
+    } else {
+        format!("{nombre} article")
+    }
+}
+
+/// `2 × 1,20 €` : la quantité et le prix d'une unité, sous le nom d'une ligne.
+pub fn detail_de_ligne(quantite: u32, prix: &str) -> String {
+    format!("{quantite} × {prix}")
+}
+
+/// Le nom d'une case de la barre de fonctions : `Rechercher (F2)`.
+pub fn fonction_nom(libelle: &str, raccourci: &str) -> String {
+    format!("{libelle} ({raccourci})")
+}
+
+/// Le nom du contrôle qui choisit une ligne du ticket (la ligne entière est cliquable).
+pub fn choisir_la_ligne(nom: &str) -> String {
+    format!("Choisir {nom}")
+}
+
+pub fn stock_limite(nom: &str, disponible: u32) -> String {
+    format!("{nom} : il n'en reste que {disponible}.")
+}
+
+pub fn introuvable_texte(saisie: &str) -> String {
+    format!(
+        "Aucun article ne correspond à « {saisie} ». Scannez à nouveau ou recherchez l'article par son nom."
+    )
+}
+
+pub fn confirmation_titre(question: crate::ui::Confirmation) -> &'static str {
+    match question {
+        crate::ui::Confirmation::AnnulerVente => "Annuler la vente ?",
+        crate::ui::Confirmation::SupprimerArticle => "Supprimer cet article ?",
+    }
+}
+
+pub fn confirmation_texte(question: crate::ui::Confirmation, articles: u32, nom: &str) -> String {
+    match question {
+        crate::ui::Confirmation::AnnulerVente => {
+            format!("Tous les articles ({articles}) seront retirés du ticket.")
+        }
+        crate::ui::Confirmation::SupprimerArticle => format!("{nom} sera retiré du ticket."),
+    }
+}
+
 /// `0 article`, `1 article`, `2 articles` (en français, zéro est au singulier).
 pub fn compteur_articles(nombre: usize) -> String {
     if nombre > 1 {

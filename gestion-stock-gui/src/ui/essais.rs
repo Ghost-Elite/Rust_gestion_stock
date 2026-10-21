@@ -184,6 +184,15 @@ pub(crate) fn nombre_de_pieces(h: &Harness<'static, Application>) -> usize {
     h.state().etat.as_ref().unwrap().pieces_recentes(100).len()
 }
 
+/// Sans les textes d'un contrôle grisé : les WCAG les dispensent de contraste (la raison est
+/// écrite à côté).
+pub(crate) fn sans_les_textes_grises(textes: Vec<TextePeint>) -> Vec<TextePeint> {
+    textes
+        .into_iter()
+        .filter(|t| t.couleur != palette::GRISE_TEXTE)
+        .collect()
+}
+
 pub(crate) fn verifier_contrastes(textes: &[TextePeint], nom_du_cas: &str) {
     assert!(
         textes.len() >= 6,
@@ -243,4 +252,12 @@ pub(crate) fn est_selectionne(h: &Harness<'static, Application>, libelle: &str) 
 pub(crate) fn quantite_en_stock(h: &Harness<'static, Application>, nom: &str) -> u32 {
     let etat = h.state().etat.as_ref().unwrap();
     etat.lignes(nom, false)[0].quantite
+}
+
+/// Tape un texte dans le champ de scan et valide par Entrée, comme une personne (ou un lecteur
+/// de codes-barres, qui tape le code puis Entrée).
+pub(crate) fn scanner(h: &mut Harness<'static, Application>, texte: &str) {
+    saisir(h, CHAMP_SCAN, texte);
+    h.key_press(eframe::egui::Key::Enter);
+    h.run();
 }
