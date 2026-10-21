@@ -48,6 +48,9 @@ pub enum ErreurStock {
     ProduitVendu(String),
     /// La devise et le profil ne changent plus une fois qu'une vente est enregistrée.
     ReglagesVerrouilles,
+    /// Un problème avec la base de données : le message est déjà en français et ne contient
+    /// jamais le mot de passe.
+    Base(String),
 }
 
 impl fmt::Display for ErreurStock {
@@ -114,6 +117,7 @@ impl fmt::Display for ErreurStock {
                 f,
                 "Le journal de caisse a été modifié : la pièce n° {numero} ne correspond plus à son empreinte."
             ),
+            ErreurStock::Base(message) => write!(f, "{message}"),
             ErreurStock::PrixManquant(nom) => write!(
                 f,
                 "Le produit « {nom} » n'a pas de prix : donnez-lui un prix avant de le vendre."

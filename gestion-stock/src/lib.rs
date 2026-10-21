@@ -1,3 +1,4 @@
+pub mod base;
 pub mod commandes;
 pub mod erreur;
 pub mod horodatage;
