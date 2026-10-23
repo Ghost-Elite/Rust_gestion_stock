@@ -1,0 +1,47 @@
+[package]
+name = "rust-apprentissage"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+
+# Les solutions des défis se lancent avec : cargo run --example ch01_defi
+[[example]]
+name = "ch01_defi"
+path = "solutions/ch01_defi.rs"
+
+[[example]]
+name = "ch02_defi"
+path = "solutions/ch02_defi.rs"
+
+[[example]]
+name = "ch03_defi"
+path = "solutions/ch03_defi.rs"
+
+[[example]]
+name = "ch04_defi"
+path = "solutions/ch04_defi.rs"
+
+[[example]]
+name = "ch05_defi"
+path = "solutions/ch05_defi.rs"
+
+[[example]]
+name = "ch06_defi"
+path = "solutions/ch06_defi.rs"
+
+[[example]]
+name = "ch07_defi"
+path = "solutions/ch07_defi.rs"
+
+[[example]]
+name = "ch08_defi"
+path = "solutions/ch08_defi.rs"
+
+[[example]]
+name = "ch09_defi"
+path = "solutions/ch09_defi.rs"
+
+[[example]]
+name = "ch10_defi"
+path = "solutions/ch10_defi.rs"
